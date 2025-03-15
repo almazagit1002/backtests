@@ -1,13 +1,21 @@
+import os
 import json
 import logging
+
 import boto3
 import pandas as pd
+from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BUCKET_NAME = "sol-price-storage-ctech-bot"
+# Load environment variables from .env file
+load_dotenv()
+
+# Retrieve the S3 bucket name
+BUCKET_NAME = os.getenv("BUCKET_NAME")
+PREFIX = os.getenv("PREFIX")
 
 # Initialize S3 client
 s3 = boto3.client("s3")
@@ -33,7 +41,7 @@ def fetch_json_from_s3(bucket_name, file_key):
 
 # Fetch all JSON files under "candles/15min/year=2025/"
 logger.info("Fetching JSON files")
-json_files = list_s3_files(BUCKET_NAME, "candles/15min/year=2025/")
+json_files = list_s3_files(BUCKET_NAME, PREFIX)
 
 # Load data into a Pandas DataFrame
 data_list = []
@@ -46,8 +54,7 @@ for file in json_files:
             "open": json_data["open"],
             "high": json_data["high"],
             "low": json_data["low"],
-            "close": json_data["close"],
-            "num_data_points": json_data["number_of_data_points"]
+            "close": json_data["close"]
         }
         data_list.append(filtered_data)
 
