@@ -3,3 +3,4 @@ boto3
 supabase
 matplotlib
 python-dotenv
+pyyaml

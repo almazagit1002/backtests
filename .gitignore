@@ -170,3 +170,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 sol_price.csv
+mean_reversion_volatility_bands/config.yaml
+mean_reversion_volatility_bands/data/
+mean_reversion_volatility_bands/images/
