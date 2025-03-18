@@ -1,0 +1,41 @@
+# Project Structure
+
+Root directory: `backtests`
+
+- **docs/**
+    - **api**
+    - **strategies**
+        - visualization.md
+        - backtesting.md
+        - configuration..d
+    - project_structure.md
+- **mean_reversion_volatility_bands/**
+    - **data/**
+        - indicators.csv
+        - portafolio.csv
+        - signals.csv
+        - trades.csv
+   - **images/**
+      - back_test.pdf
+      - mean_reversion_volatility_bands_all.pdf
+      - mean_reversion_volatility_bands_splited.pdf
+      - profit_distribution.pdf
+      - signals.pdf
+  - __init__.py
+  - back_test.py
+  - config.yaml
+  - signal_generator.py
+  - test_backtest.py
+  - trade_indicators.py
+  - visualization.py
+- **utils/**
+    - __init__.py
+    - utils.py
+- .env
+- generate_structure.py
+- get_data_s3.py
+- mean_reversion_volatility_bands.py
+- README.md
+- requirements.txt
+- setup.py
+- sol_price.csv

@@ -1,0 +1,58 @@
+site_name: Trading Strategy Backtests
+site_description: Documentation for trading strategy backtesting framework
+site_author: Your Name
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: indigo
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.expand
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - footnotes
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [mean_reversion_volatility_bands, utils]
+          options:
+            show_source: true
+            docstring_style: google
+
+nav:
+  - Home: index.md
+  - Project Structure: project_structure.md
+  - Mean Reversion Volatility Bands:
+      - Overview: strategies/mean_reversion_volatility_bands/overview.md
+      - Configuration: strategies/mean_reversion_volatility_bands/configuration.md
+      - Trade Indicators: strategies/mean_reversion_volatility_bands/trade_indicators.md
+      - Signal Generation: strategies/mean_reversion_volatility_bands/signal_generation.md
+      - Backtesting: strategies/mean_reversion_volatility_bands/backtesting.md
+      - Visualization: strategies/mean_reversion_volatility_bands/visualization.md
+      - Main Implementation: strategies/mean_reversion_volatility_bands/main_implementation.md  # Add this
+  - API Reference:
+      - Mean Reversion Module: api/mean_reversion_volatility_bands.md
+      - Utilities: api/utils.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Adding New Strategies: development/adding_strategies.md

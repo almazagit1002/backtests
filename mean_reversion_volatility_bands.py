@@ -232,10 +232,6 @@ class Backtester:
             if self.optimze_enabled:
                 logging.info("Running backtest simulation with parameter optimization...")
                 
-                # Configure parameter ranges for optimization
-                # tp_levels = [1.5, 2.0, 2.5, 3.0]
-                # sl_levels = [0.5, 1.0, 1.5]
-                
                 # Create backtester instance for optimization
                 backtester = TradingBacktester(
                     initial_budget=initial_budget,
