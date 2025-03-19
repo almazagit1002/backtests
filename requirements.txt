@@ -10,3 +10,4 @@ mkdocs-autorefs
 mkdocstrings 
 mkdocstrings-python
 pymdown-extensions
+seaborn

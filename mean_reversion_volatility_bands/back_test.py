@@ -404,8 +404,32 @@ class TradingBacktester:
             Dictionary with performance metrics
         """
         return self.metrics
+
+
+class StrategyOptimizer:
+    """
+    A class for optimizing trading strategy parameters by running multiple backtests
+    with different parameter combinations.
+    """
     
-    def optimize_parameters(self, signals_df, tp_levels=[1, 2, 3], sl_levels=[0.5, 1, 1.5]):
+    def __init__(self, initial_budget=1000, fee_rate=0.005, max_positions=4):
+        """
+        Initialize the optimizer with fixed strategy parameters.
+        
+        Parameters:
+        -----------
+        initial_budget : float
+            Initial trading budget
+        fee_rate : float
+            Trading fee as a percentage (0.005 = 0.5%)
+        max_positions : int
+            Maximum number of simultaneous positions
+        """
+        self.initial_budget = initial_budget
+        self.fee_rate = fee_rate
+        self.max_positions = max_positions
+        
+    def optimize(self, signals_df, tp_levels=[1, 2, 3], sl_levels=[0.5, 1, 1.5]):
         """
         Optimize strategy parameters by running multiple backtests with different parameters.
         
@@ -454,3 +478,59 @@ class TradingBacktester:
         # Convert to DataFrame and sort by Total Return
         results_df = pd.DataFrame(results).sort_values('Total_Return_Pct', ascending=False)
         return results_df
+    
+    def get_best_parameters(self, results_df, metric='Total_Return_Pct'):
+        """
+        Get the best parameters based on a specific metric.
+        
+        Parameters:
+        -----------
+        results_df : pandas DataFrame
+            DataFrame with optimization results
+        metric : str
+            Metric to use for determining the best parameters
+            
+        Returns:
+        --------
+        best_params : dict
+            Dictionary with the best parameters
+        """
+        best_row = results_df.sort_values(metric, ascending=False).iloc[0]
+        return {
+            'TP_Level': best_row['TP_Level'],
+            'SL_Level': best_row['SL_Level'],
+            metric: best_row[metric]
+        }
+    
+    
+    
+    def print_optimization_results(self, results_df, top_n=5):
+        """
+        Print the top optimization results in a formatted way.
+        
+        Parameters:
+        -----------
+        results_df : pandas DataFrame
+            DataFrame with optimization results
+        top_n : int
+            Number of top results to display
+            
+        Returns:
+        --------
+        self : StrategyOptimizer
+            Returns self for method chaining
+        """
+        print("\n----- OPTIMIZATION RESULTS -----")
+        print(f"Top {top_n} Parameter Combinations:")
+        for i, row in results_df.head(top_n).iterrows():
+            print(f"\nRank {i+1}:")
+            print(f"  TP Level: {row['TP_Level']}")
+            print(f"  SL Level: {row['SL_Level']}")
+            print(f"  Total Return: {row['Total_Return_Pct']:.2f}%")
+            print(f"  Win Rate: {row['Win_Rate']:.2f}%")
+            print(f"  Profit Factor: {row['Profit_Factor']:.2f}")
+            print(f"  Max Drawdown: {row['Max_Drawdown']:.2f}%")
+            print(f"  Total Trades: {row['Total_Trades']}")
+        
+        print("\n-------------------")
+        return self

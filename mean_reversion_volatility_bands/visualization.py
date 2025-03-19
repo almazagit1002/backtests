@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.ticker import MaxNLocator
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import logging
 
 # Configure logging
@@ -607,3 +607,43 @@ class TradingVisualizer:
             logging.info(f"Figure saved to {filename}")
         else:
             logging.warning(f"Unable to save figure: figure object is None")
+
+    def plot_heatmap(self, results_df, metric='Total_Return_Pct'):
+        """
+        Create and return a heatmap visualization of optimization results.
+
+        Parameters:
+        -----------
+        results_df : pandas DataFrame or dict
+            DataFrame (or dictionary convertible to DataFrame) with optimization results.
+        metric : str, optional
+            Metric to use for the heatmap (default is 'Total_Return_Pct').
+
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            Figure object containing the heatmap.
+        """
+       
+        required_columns = {'TP_Level', 'SL_Level', metric}
+        missing_cols = required_columns - set(results_df.columns)
+        if missing_cols:
+            raise ValueError(f"Missing columns in DataFrame: {missing_cols}")
+
+        # Pivot the DataFrame for heatmap
+        try:
+            heatmap_data = results_df.pivot(index='TP_Level', columns='SL_Level', values=metric)
+        except Exception as e:
+            raise ValueError(f"Error during pivot operation: {e}")
+
+        # Create figure and axes
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.heatmap(heatmap_data, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5, ax=ax)
+
+        # Set labels and title
+        ax.set_title(f'Heatmap of {metric}')
+        ax.set_xlabel('SL_Level')
+        ax.set_ylabel('TP_Level')
+
+        # Return the figure object
+        return fig
