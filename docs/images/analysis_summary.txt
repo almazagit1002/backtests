@@ -1,0 +1,47 @@
+========== OPTIMIZATION ANALYSIS ==========
+Number of configurations tested: 15
+Average return: -10.12%
+Configurations with positive returns: 0 (0.0%)
+
+Best configuration:
+  tp_level: 2.25
+  sl_level: 1.08
+  max_positions: 9.0
+  keltner_period: 25.0
+  cci_period: 50.0
+  bollinger_period: 42.0
+  atr_multiplier: 2.29
+  std_multiplier: 2.37
+  CCI_up_threshold: 107.0
+  CCI_low_threshold: -89.0
+  Bollinger_Keltner_alignment: 0.0042
+  window_size: 6.0
+  Return: -2.16%
+
+Parameter impact on returns (correlation):
+  cci_period: 0.695
+  CCI_up_threshold: 0.641
+  std_multiplier: 0.491
+  max_positions: 0.409
+  bollinger_period: 0.389
+  tp_level: 0.372
+  keltner_period: 0.198
+  window_size: 0.060
+  sl_level: 0.008
+  atr_multiplier: -0.326
+  Bollinger_Keltner_alignment: -0.533
+  CCI_low_threshold: -0.588
+
+Optimal parameter ranges (from top 5 configurations):
+  tp_level: 1.11 to 3.41
+  sl_level: 0.68 to 2.28
+  max_positions: 8 to 9
+  keltner_period: 21 to 25
+  cci_period: 44 to 50
+  bollinger_period: 38 to 48
+  atr_multiplier: 1.6 to 3.05
+  std_multiplier: 1.55 to 2.87
+  CCI_up_threshold: 103 to 108
+  CCI_low_threshold: -93 to -87
+  Bollinger_Keltner_alignment: 0.0011 to 0.0061
+  window_size: 5 to 9

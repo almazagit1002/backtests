@@ -13,14 +13,14 @@ The strategy enters positions when price action indicates a potential reversion 
 ## Strategy Logic
 
 1. **Entry Signals**:
-   - CCI moves below the oversold threshold (default: -30) for long positions
-   - CCI moves above the overbought threshold (default: 70) for short positions
+   - CCI moves below the oversold threshold  for long positions
+   - CCI moves above the overbought threshold  for short positions
    - Price is near or beyond the Bollinger Bands
    - Bollinger Bands and Keltner Channels have proper alignment
 
 2. **Exit Signals**:
-   - Take profit: When price reaches the target profit level (default: 2 times entry distance)
-   - Stop loss: When price moves against the position by a defined threshold (default: 1 times entry distance)
+   - Take profit: When price reaches the target profit level 
+   - Stop loss: When price moves against the position by a defined threshold 
    - Time-based exit: After a specified maximum holding period
 
 ## Performance Characteristics

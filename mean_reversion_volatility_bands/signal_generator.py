@@ -33,10 +33,12 @@ class SignalGenerator:
         return True
     
     @staticmethod
-    def generate_signals(df: pd.DataFrame, thresholds: dict, min_required_rows=21) -> pd.DataFrame:
+    def generate_signals(df: pd.DataFrame, CCI_up_threshold, CCI_low_threshold, Bollinger_Keltner_alignment, window_size, min_required_rows) -> pd.DataFrame:
+
         """
         Generate buy (long) and sell (short) signals based on trading indicators.
         """
+        # min_required_rows= thresholds["min_required_rows"]
         if len(df) < min_required_rows:
             logging.warning(f"Not enough data points ({len(df)}). Need at least {min_required_rows}.")
             return df  # Return original DataFrame instead of False
@@ -55,10 +57,10 @@ class SignalGenerator:
         result['cci_above_threshold'] = False
         result['bands_aligned_short'] = False
 
-        CCI_up_threshold = thresholds["CCI_up_threshold"]
-        CCI_low_threshold = thresholds["CCI_low_threshold"]
-        Bollinger_Keltner_alignment = thresholds["Bollinger_Keltner_alignment"]
-        window_size = thresholds["window_size"]
+        # CCI_up_threshold = thresholds["CCI_up_threshold"]
+        # CCI_low_threshold = thresholds["CCI_low_threshold"]
+        # Bollinger_Keltner_alignment = thresholds["Bollinger_Keltner_alignment"]
+        # window_size = thresholds["window_size"]
 
         for i in range(min_required_rows, len(result)):
             current_index = result.index[i]

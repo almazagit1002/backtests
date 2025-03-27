@@ -608,42 +608,45 @@ class TradingVisualizer:
         else:
             logging.warning(f"Unable to save figure: figure object is None")
 
-    def plot_heatmap(self, results_df, metric='Total_Return_Pct'):
+    def plot_heatmaps(self, optimization_results):
         """
-        Create and return a heatmap visualization of optimization results.
+        Create and return a figure with 4 heatmaps showing different parameter combinations.
 
         Parameters:
         -----------
-        results_df : pandas DataFrame or dict
-            DataFrame (or dictionary convertible to DataFrame) with optimization results.
-        metric : str, optional
-            Metric to use for the heatmap (default is 'Total_Return_Pct').
+        optimization_results : pandas DataFrame
+            DataFrame containing optimization results.
 
         Returns:
         --------
         fig : matplotlib.figure.Figure
-            Figure object containing the heatmap.
+            Figure object containing the heatmaps.
         """
-       
-        required_columns = {'TP_Level', 'SL_Level', metric}
-        missing_cols = required_columns - set(results_df.columns)
-        if missing_cols:
-            raise ValueError(f"Missing columns in DataFrame: {missing_cols}")
 
-        # Pivot the DataFrame for heatmap
-        try:
-            heatmap_data = results_df.pivot(index='TP_Level', columns='SL_Level', values=metric)
-        except Exception as e:
-            raise ValueError(f"Error during pivot operation: {e}")
+        # Define the most interesting parameter combinations
+        param_combinations = [
+            ('cci_period', 'bollinger_period'),
+            ('tp_level', 'sl_level'),
+            ('max_positions', 'window_size'),
+            ('CCI_up_threshold', 'CCI_low_threshold')
+        ]
 
-        # Create figure and axes
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.heatmap(heatmap_data, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5, ax=ax)
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))  # 2x2 grid of plots
 
-        # Set labels and title
-        ax.set_title(f'Heatmap of {metric}')
-        ax.set_xlabel('SL_Level')
-        ax.set_ylabel('TP_Level')
+        for ax, (x_param, y_param) in zip(axes.flat, param_combinations):
+            try:
+                # Pivot the data for heatmap
+                heatmap_data = optimization_results.pivot_table(index=y_param, columns=x_param, values='total_return_pct')
 
-        # Return the figure object
+                # Plot heatmap
+                sns.heatmap(heatmap_data, cmap="coolwarm", annot=True, fmt=".1f", ax=ax)
+                ax.set_title(f'Heatmap of {y_param} vs {x_param} (Total Return %)')
+                ax.set_xlabel(x_param)
+                ax.set_ylabel(y_param)
+
+            except Exception as e:
+                ax.set_title(f"Error: {x_param} vs {y_param}")
+                print(f"Error during pivot operation for {x_param} vs {y_param}: {e}")
+
+        plt.tight_layout()
         return fig

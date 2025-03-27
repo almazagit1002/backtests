@@ -44,12 +44,16 @@ nav:
   - Project Structure: project_structure.md
   - Mean Reversion Volatility Bands:
       - Overview: strategies/mean_reversion_volatility_bands/overview.md
+      - Strategy Parameters: strategies/mean_reversion_volatility_bands/strategy_parameters.md
       - Configuration: strategies/mean_reversion_volatility_bands/configuration.md
       - Trade Indicators: strategies/mean_reversion_volatility_bands/trade_indicators.md
       - Signal Generation: strategies/mean_reversion_volatility_bands/signal_generation.md
       - Backtesting: strategies/mean_reversion_volatility_bands/backtesting.md
+      - Optimization: strategies/mean_reversion_volatility_bands/optimization.md
+      - Optimization Analysis: strategies/mean_reversion_volatility_bands/optimization_analysis.md
       - Visualization: strategies/mean_reversion_volatility_bands/visualization.md
-      - Main Implementation: strategies/mean_reversion_volatility_bands/main_implementation.md  # Add this
+      - Optimization Implimentation: strategies/mean_reversion_volatility_bands/optimization_implimentation.md
+      - Main Implementation: strategies/mean_reversion_volatility_bands/main_implementation.md  
   - API Reference:
       - Mean Reversion Module: api/mean_reversion_volatility_bands.md
       - Utilities: api/utils.md

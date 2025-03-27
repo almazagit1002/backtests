@@ -1,0 +1,31 @@
+load_data_path: sol_price.csv
+
+save_data_paths:
+  prefix: mean_reversion_volatility_bands/data/
+  optimization: optimization.csv
+  optimization_analysis: optimization_analysis
+  update_config: mean_reversion_volatility_bands/config.yaml
+
+modes:
+  analise_optimization_mode: True
+
+backtest:
+  initial_budget: 1000
+  fee_rate: 0.005
+
+pbounds:
+  tp_level: [1.0, 3.5]
+  sl_level: [0.5, 2.5]
+  max_positions: [1, 10]
+  atr_multiplier: [1.2, 3.5]
+  keltner_period: [15,30]
+  cci_period: [14, 50]
+  bollinger_period: [10, 50]
+  std_multiplier: [1.2, 3.0]
+  CCI_up_threshold: [50, 110]
+  CCI_low_threshold: [-110, -10]
+  Bollinger_Keltner_alignment: [0.001, 0.01]
+  window_size: [3, 10]
+optimization:
+  init_points: 5
+  n_iter: 10

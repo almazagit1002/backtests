@@ -3,16 +3,32 @@ import logging
 import pandas as pd
 import numpy as np
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-DEBUG = False
+
 class TradingIndicators:
     """
     Calculates technical indicators used in trading strategies.
     """
+    def __init__(self, debug_mode: bool = False, logging_mode: bool = True):
+        self.debug_mode = debug_mode
+        self.logging_mode = logging_mode
+        self.logger = logging.getLogger(__name__)  # Create a logger for this class only
+
+        if not self.logging_mode:
+            self.logger.setLevel(logging.CRITICAL)  # Disable only this logger
+        elif self.debug_mode:
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.INFO)
+
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.propagate = False  # Prevent affecting other loggers
+
+
     
-    @staticmethod
-    def calculate_average_true_range(df: pd.DataFrame) -> pd.Series:
+    def calculate_average_true_range(self,df: pd.DataFrame) -> pd.Series:
         """
         Calculate the Average True Range (ATR), an indicator of market volatility.
         ATR is the average of true ranges over the specified period.
@@ -32,24 +48,20 @@ class TradingIndicators:
         high_close = abs(df['high'] - df['close'].shift())  # |Current High - Previous Close|
         low_close = abs(df['low'] - df['close'].shift())  # |Current Low - Previous Close|
         
-        # Log the calculation process
-        if DEBUG:
+        if self.debug_mode:
             logging.debug(f"Calculated high-low range: {high_low.head()}")
             logging.debug(f"Calculated high-close range: {high_close.head()}")
             logging.debug(f"Calculated low-close range: {low_close.head()}")
         
-        # Take the maximum of the three components
-        true_range = pd.Series(
-            np.maximum(np.maximum(high_low, high_close), low_close), 
-            index=df.index
-        )
-        if DEBUG:
+        true_range = pd.Series(np.maximum(np.maximum(high_low, high_close), low_close), index=df.index)
+        
+        if self.debug_mode:
             logging.debug(f"True Range calculated: {true_range.head()}")
         
         return true_range
     
-    @staticmethod
-    def add_keltner_channels(df: pd.DataFrame, period=20, atr_multiplier=2.0) -> pd.DataFrame:
+    
+    def add_keltner_channels(self, df: pd.DataFrame, period, atr_multiplier) -> pd.DataFrame:
         """
         Calculate Keltner Channels using Exponential Moving Average (EMA) and Average True Range (ATR).
         Keltner Channels are volatility-based envelopes set above and below an EMA.
@@ -67,26 +79,25 @@ class TradingIndicators:
         
         # Calculate Exponential Moving Average
         result['EMA'] = result['close'].ewm(span=period, adjust=False).mean()
-        if DEBUG:
+        if self.debug_mode:
             logging.debug(f"EMA calculated: {result['EMA'].head()}")
         
         # Calculate Average True Range
-        result['ATR'] = TradingIndicators.calculate_average_true_range(result)
+        result['ATR'] = self.calculate_average_true_range(result)
         
         # Calculate upper and lower bands
         result['KeltnerUpper'] = result['EMA'] + (atr_multiplier * result['ATR'])
         result['KeltnerLower'] = result['EMA'] - (atr_multiplier * result['ATR'])
         
-        # Log the percentage of NaN values in Keltner Channels (due to warm-up period)
-        nan_upper = result['KeltnerUpper'].isna().sum()
-        nan_lower = result['KeltnerLower'].isna().sum()
-        total_rows = len(result)
-        logging.info(f"Keltner Channels NaN values: Upper={nan_upper}/{total_rows} ({nan_upper/total_rows:.2%}), Lower={nan_lower}/{total_rows} ({nan_lower/total_rows:.2%})")
-            
+        if self.logging_mode:
+            nan_upper = result['KeltnerUpper'].isna().sum()
+            nan_lower = result['KeltnerLower'].isna().sum()
+            total_rows = len(result)
+            logging.info(f"Keltner Channels NaN values: Upper={nan_upper}/{total_rows} ({nan_upper/total_rows:.2%}), Lower={nan_lower}/{total_rows} ({nan_lower/total_rows:.2%})")
         return result
     
-    @staticmethod
-    def add_cci(df: pd.DataFrame, period=20) -> pd.DataFrame:
+    
+    def add_cci(self,df: pd.DataFrame, period) -> pd.DataFrame:
         """
         Calculate Commodity Channel Index (CCI) to measure market trend strength.
         CCI measures the current price level relative to an average price level over a period of time.
@@ -130,14 +141,15 @@ class TradingIndicators:
         )
         
         # Log the percentage of zero values in CCI
-        zero_count = (result['CCI'] == 0).sum()
-        total_rows = len(result)
-        logging.info(f"CCI zeros: {zero_count}/{total_rows} ({zero_count/total_rows:.2%})")
+        if self.logging_mode:
+            zero_count = (result['CCI'] == 0).sum()
+            total_rows = len(result)
+            logging.info(f"CCI zeros: {zero_count}/{total_rows} ({zero_count/total_rows:.2%})")
         
         return result
     
-    @staticmethod
-    def add_bollinger_bands(df: pd.DataFrame, period=20, std_multiplier=2.0) -> pd.DataFrame:
+
+    def add_bollinger_bands(self,df: pd.DataFrame, period, std_multiplier) -> pd.DataFrame:
         """
         Calculate Bollinger Bands using Simple Moving Average (SMA) and standard deviation.
         Bollinger Bands consist of a middle band (SMA) with upper and lower bands
@@ -165,9 +177,10 @@ class TradingIndicators:
         result['BollingerLower'] = result['SMA'] - (std_multiplier * result['StdDev'])
         
         # Log the percentage of NaN values in Bollinger Bands (due to warm-up period)
-        nan_upper = result['BollingerUpper'].isna().sum()
-        nan_lower = result['BollingerLower'].isna().sum()
-        total_rows = len(result)
-        logging.info(f"Bollinger Bands NaN values: Upper={nan_upper}/{total_rows} ({nan_upper/total_rows:.2%}), Lower={nan_lower}/{total_rows} ({nan_lower/total_rows:.2%})")
+        if self.logging_mode:
+            nan_upper = result['BollingerUpper'].isna().sum()
+            nan_lower = result['BollingerLower'].isna().sum()
+            total_rows = len(result)
+            logging.info(f"Bollinger Bands NaN values: Upper={nan_upper}/{total_rows} ({nan_upper/total_rows:.2%}), Lower={nan_lower}/{total_rows} ({nan_lower/total_rows:.2%})")
             
         return result

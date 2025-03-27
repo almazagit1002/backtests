@@ -7,14 +7,16 @@ Root directory: `backtests`
     - **strategies**
         - visualization.md
         - backtesting.md
-        - configuration..d
+        - configuration.md
     - project_structure.md
 - **mean_reversion_volatility_bands/**
     - **data/**
         - indicators.csv
+        - optimization.csv
         - portafolio.csv
         - signals.csv
         - trades.csv
+        - **optimization_analysis/**
    - **images/**
       - back_test.pdf
       - mean_reversion_volatility_bands_all.pdf
@@ -24,10 +26,13 @@ Root directory: `backtests`
   - __init__.py
   - back_test.py
   - config.yaml
+  - optimization_config.yaml
   - signal_generator.py
   - test_backtest.py
   - trade_indicators.py
   - visualization.py
+  - optimization_analysis.py
+  - optimization.py
 - **utils/**
     - __init__.py
     - utils.py
@@ -35,6 +40,7 @@ Root directory: `backtests`
 - generate_structure.py
 - get_data_s3.py
 - mean_reversion_volatility_bands.py
+- mean_reversion_volatility_bands_optimization.py
 - README.md
 - requirements.txt
 - setup.py
