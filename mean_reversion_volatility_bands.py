@@ -7,10 +7,8 @@ from mean_reversion_volatility_bands.trade_indicators import TradingIndicators
 from mean_reversion_volatility_bands.signal_generator import SignalGenerator
 from mean_reversion_volatility_bands.visualization import TradingVisualizer
 from mean_reversion_volatility_bands.back_test import TradingBacktester
-from mean_reversion_volatility_bands.optimization import StrategyOptimizer
-from mean_reversion_volatility_bands.optimization_analysis import OptimizationAnalyzer
 
-from utils.utils import load_config, save_config_yaml
+from utils.utils import load_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -48,7 +46,6 @@ class Backtester:
         # Default modes
         self.debug_mode = False
         self.plot_enabled = False
-        self.optimize_enabled = False
         self.csv_export_enabled = False
      
         logging.info("Backtester initialized")
@@ -75,27 +72,6 @@ class Backtester:
         logging.info(f"Plot mode {'enabled' if enabled else 'disabled'}")
         return self
     
-    def set_optimize_mode(self, enabled):
-        """
-        Enable or disable optimization.
-        
-        Args:
-            enabled (bool): Whether to enable optimization.
-        """
-        self.optimize_enabled = enabled
-        logging.info(f"Optimization mode {'enabled' if enabled else 'disabled'}")
-        return self
-    
-    def set_optimization_analysis_mode(self, enabled):
-        """
-        Enable or disable optimization.
-        
-        Args:
-            enabled (bool): Whether to enable optimization.
-        """
-        self.optimization_analysis_enabled = enabled
-        logging.info(f"Analysing Optimization Results mode {'enabled' if enabled else 'disabled'}")
-        return self
 
     def set_csv_export(self, enabled):
         """
@@ -134,38 +110,39 @@ class Backtester:
             pd.DataFrame: DataFrame with calculated indicators or False on error.
         """
         indicators_config = self.config["indicators"]
-        print(indicators_config)
+        
         logging.info("Calculating indicators for backtest...")
         try:
             # Make a copy to avoid modifying the original
-            self.indicators_df = self.df.copy()
-            
+            indicators_df = self.df.copy()
+            indicators = TradingIndicators(debug_mode=self.debug_mode, logging_mode=True)  # Instantiate the class
+
             # Add Keltner Channels
-            self.indicators_df = TradingIndicators.add_keltner_channels(
-                self.indicators_df, 
+            indicators_df = indicators.add_keltner_channels(
+                indicators_df, 
                 period=indicators_config["keltner_period"], 
-                atr_multiplier=indicators_config["atr_multiplier"]
-            )
+                atr_multiplier=indicators_config["atr_multiplier"])
+            
             logging.info(f"Keltner Channels added with period={indicators_config['keltner_period']}, "
                          f"multiplier={indicators_config['atr_multiplier']}")
             
             # Add Commodity Channel Index (CCI)
-            self.indicators_df = TradingIndicators.add_cci(
-                self.indicators_df, 
-                period=indicators_config["cci_period"]
-            )
+            indicators_df = indicators.add_cci(
+                indicators_df,
+                period=indicators_config["cci_period"])
+
             logging.info(f"CCI added with period={indicators_config['cci_period']}")
             
             # Add Bollinger Bands
-            self.indicators_df = TradingIndicators.add_bollinger_bands(
-                self.indicators_df, 
-                period=indicators_config["bollinger_period"], 
-                std_multiplier=indicators_config["std_multiplier"]
-            )
+            indicators_df = indicators.add_bollinger_bands(
+                indicators_df, period=indicators_config["bollinger_period"],
+                std_multiplier=indicators_config["std_multiplier"])
+            
             logging.info(f"Bollinger Bands added with period={indicators_config['bollinger_period']}, "
                          f"multiplier={indicators_config['std_multiplier']}")
             
             logging.info("All indicators calculated successfully.")
+            self.indicators_df = indicators_df
             
             # If debug mode is enabled, inspect the indicators
             if self.debug_mode:
@@ -174,8 +151,8 @@ class Backtester:
         except Exception as e:
             logging.error(f"Error in indicator calculation: {e}")
             return False
-            
-        return self.indicators_df
+        
+        
     
     def inspect_indicators(self):
         """
@@ -185,6 +162,7 @@ class Backtester:
         Returns:
             pd.DataFrame: DataFrame with indicators.
         """
+
         if self.indicators_df is None:
             logging.warning("No indicators to inspect. Call prepare_indicators() first.")
             return None
@@ -229,49 +207,18 @@ class Backtester:
 
             logging.info(f"Generated {((self.signals_df['LongSignal']) | (self.signals_df['ShortSignal'])).sum()} trading signals")
 
-            return self.signals_df
+            
         except Exception as e:
             logging.error(f"Error generating signals: {e}")
             return None
-        
-    def run_optimiziation(self):
-        backtest_config = self.config['backtest']
 
-        # Define default parameters
-        initial_budget = backtest_config['initial_budget']
-        fee_rate = backtest_config['fee_rate']
-        #if optimization enambeled optimize first 
-        try:
-            logging.info("Running backtest simulation with parameter optimization...")
-            # Create StrategyOptimizer instance for optimization
-            optimizer = StrategyOptimizer(
-                    initial_budget=initial_budget,
-                    fee_rate=fee_rate,
-                    df =self.df
-                )
-                
-               
-            self.optimization_results = optimizer.optimize()
-            print(self.optimization_results.columns)
-            best_optimization_results = optimizer.get_best_parameters(self.optimization_results)
-            logging.info("Updating configuration parameters")
-            save_config_yaml(best_optimization_results,CONFIG_PATH)
-            self.config = load_config(CONFIG_PATH)
-         
-            return self
-                
-        except Exception as e:
-            logging.error(f"Error running backtest: {str(e)}")
-            logging.debug(traceback.format_exc())
-            return None, None
 
     def run_backtest(self):
         """
         Execute the backtest simulation using the generated signals.
         
-        The function supports two modes:
-        1. Optimization mode: Tests multiple TP/SL combinations to find optimal parameters
-        2. Standard mode: Runs a single backtest with predefined parameters
+        
+        Standard mode: Runs a single backtest with predefined parameters
         
         Returns:
             tuple: (trades_df, portfolio_df) containing trade details and portfolio performance.
@@ -292,66 +239,28 @@ class Backtester:
         max_positions = backtest_config['max_positions']
         
         try:
-            if self.optimize_enabled:
-                logging.info("Running backtest simulation with parameter optimization...")
-                
-                # Create StrategyOptimizer instance for optimization
-                optimizer = StrategyOptimizer(
-                    initial_budget=initial_budget,
-                    fee_rate=fee_rate
+            # Standard mode with default parameters
+            logging.info("Running standard backtest simulation...")
+            backtester = TradingBacktester(
+                initial_budget=initial_budget,
+                tp_level=backtest_config['tp_level'],
+                sl_level=backtest_config['sl_level'],
+                fee_rate=fee_rate,
+                max_positions=max_positions
                 )
-                
-               
-                self.optimization_results = optimizer.optimize(
-                    self.signals_df)
-               
-                # # Process optimization results
-                # if self.optimization_results.empty:
-                #     logging.error("Optimization returned no valid results")
-                #     return None, None
-                    
-                # Get best parameters
-                best_params = optimizer.get_best_parameters(self.optimization_results)
-                best_tp = best_params['tp_level']
-                best_sl = best_params['sl_level']
-                best_max_positions = best_params['max_positions']
-                
-                # Log optimization results
-                optimizer.print_optimization_results(self.optimization_results)
-                
-                logging.info(f"Using optimal parameters: TP={best_tp}, SL={best_sl}")
-                
-            #     # Create backtester with optimal parameters
-            #     backtester = TradingBacktester(
-            #         initial_budget=initial_budget,
-            #         tp_level=best_tp,
-            #         sl_level=best_sl,
-            #         fee_rate=fee_rate,
-            #         max_positions=best_max_positions
-            #     )
-            # else:
-            #     # Standard mode with default parameters
-            #     logging.info("Running standard backtest simulation...")
-            #     backtester = TradingBacktester(
-            #         initial_budget=initial_budget,
-            #         tp_level=backtest_config['tp_level'],
-            #         sl_level=backtest_config['sl_level'],
-            #         fee_rate=fee_rate,
-            #         max_positions=max_positions
-            #     )
             
-            # # Run the backtest
-            # backtester.backtest(self.signals_df)
+            # Run the backtest
+            backtester.backtest(self.signals_df)
             
-            # # Store results
-            # self.trades_df = backtester.get_trades()
-            # self.portfolio_df = backtester.get_portfolio()
-            # self.metrics = backtester.get_metrics()
+            # Store results
+            self.trades_df = backtester.get_trades()
+            self.portfolio_df = backtester.get_portfolio()
+            self.metrics = backtester.get_metrics()
             
-            # # Print detailed results
-            # backtester.print_results()
+            # Print detailed results
+            backtester.print_results()
             
-            # return self.trades_df, self.portfolio_df
+            return self.trades_df, self.portfolio_df
             
         except Exception as e:
             logging.error(f"Error running backtest: {str(e)}")
@@ -380,58 +289,49 @@ class Backtester:
             # Create an instance of the visualizer
             visualizer = TradingVisualizer(default_figsize=(16, 12))
             
-            # Create a chart with indicators
-            # fig_indicators = visualizer.visualize_indicators(self.indicators_df)
-            # indicators_path = f"{save_path_prefix}{plot_path_config['indicators']}"
-            # plt.savefig(indicators_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved combined indicators plot to {indicators_path}")
-            # figures.append(fig_indicators)
+            #Create a chart with indicators
+            fig_indicators = visualizer.visualize_indicators(self.indicators_df)
+            indicators_path = f"{save_path_prefix}{plot_path_config['indicators']}"
+            plt.savefig(indicators_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved combined indicators plot to {indicators_path}")
+            figures.append(fig_indicators)
 
-            # # Create and save multi-panel split indicator visualization
-            # fig_splited = visualizer.visualize_indicators_splited(self.indicators_df)
-            # indicators_splited_path = f"{save_path_prefix}{plot_path_config['indicators_splited']}"
-            # plt.savefig(indicators_splited_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved split indicators plot to {indicators_splited_path}")
-            # figures.append(fig_splited)
+            # Create and save multi-panel split indicator visualization
+            fig_splited = visualizer.visualize_indicators_splited(self.indicators_df)
+            indicators_splited_path = f"{save_path_prefix}{plot_path_config['indicators_splited']}"
+            plt.savefig(indicators_splited_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved split indicators plot to {indicators_splited_path}")
+            figures.append(fig_splited)
 
-            # # Plot backtest
-            # fig_backtest = visualizer.plot_backtest_results(self.signals_df, self.portfolio_df, self.trades_df)
-            # backtest_path = f"{save_path_prefix}{plot_path_config['back_test']}"
-            # plt.savefig(backtest_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved backtest results plot to {backtest_path}")
-            # figures.append(fig_backtest)
+            # Plot backtest
+            fig_backtest = visualizer.plot_backtest_results(self.signals_df, self.portfolio_df, self.trades_df)
+            backtest_path = f"{save_path_prefix}{plot_path_config['back_test']}"
+            plt.savefig(backtest_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved backtest results plot to {backtest_path}")
+            figures.append(fig_backtest)
                 
-            # # Plot profit hist
-            # fig_profit_hist = visualizer.plot_profit_histograms(self.trades_df)
-            # profit_hist_path = f"{save_path_prefix}{plot_path_config['profit_distribution']}"
-            # plt.savefig(profit_hist_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved profit histogram plot to {profit_hist_path}")
-            # figures.append(fig_profit_hist)
+            # Plot profit hist
+            fig_profit_hist = visualizer.plot_profit_histograms(self.trades_df)
+            profit_hist_path = f"{save_path_prefix}{plot_path_config['profit_distribution']}"
+            plt.savefig(profit_hist_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved profit histogram plot to {profit_hist_path}")
+            figures.append(fig_profit_hist)
             
-            # # Plot signals
-            # fig_signals = visualizer.plot_trading_signals(self.signals_df)
-            # signals_path = f"{save_path_prefix}{plot_path_config['signals']}"
-            # plt.savefig(signals_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved signals plot to {signals_path}")
-            # figures.append(fig_signals)
+            # Plot signals
+            fig_signals = visualizer.plot_trading_signals(self.signals_df)
+            signals_path = f"{save_path_prefix}{plot_path_config['signals']}"
+            plt.savefig(signals_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved signals plot to {signals_path}")
+            figures.append(fig_signals)
 
-            # # Plot metrics
-            # fig_metrics = visualizer.plot_performance_comparison(self.metrics)
-            # metrics_path = f"{save_path_prefix}{plot_path_config['metrics']}"
-            # plt.savefig(metrics_path, dpi=300, bbox_inches='tight')
-            # logging.info(f"Saved metrics plot to {metrics_path}")
-            # figures.append(fig_metrics)
+            # Plot metrics
+            fig_metrics = visualizer.plot_performance_comparison(self.metrics)
+            metrics_path = f"{save_path_prefix}{plot_path_config['metrics']}"
+            plt.savefig(metrics_path, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved metrics plot to {metrics_path}")
+            figures.append(fig_metrics)
 
-            #optimization results big analysis 
-            if self.optimize_enabled and self.optimization_analysis_enabled:
-                prefix = self.config['data_paths']['prefix']
-                _dir = self.config['data_paths']['optimization_analysis']
-                optimization_analysis_path = prefix + _dir
-                optimization_analyser = OptimizationAnalyzer(self.optimization_results,optimization_analysis_path)
-                # Run all analyses
-                optimization_analyser.run_all_analyses()
-                
-                logging.info(f"Saved metrics plot to {optimization_analysis_path}")
+
           
             logging.info(f"Successfully generated {len(figures)} visualizations")
             
@@ -457,30 +357,26 @@ class Backtester:
             
         try:
             logging.info("Exporting results to CSV files...")
-            if self.optimization_results is not None:
-                optimization_path = f"{save_path_prefix}{data_path_config['optimization']}"
-                self.optimization_results.to_csv(optimization_path)
-                logging.info(f"Saved optimization reuslts to {optimization_path}")
             
-            # if self.indicators_df is not None:
-            #     indicators_path = f"{save_path_prefix}{data_path_config['indicators']}"
-            #     self.indicators_df.to_csv(indicators_path)
-            #     logging.info(f"Saved indicators to {indicators_path}")
+            if self.indicators_df is not None:
+                indicators_path = f"{save_path_prefix}{data_path_config['indicators']}"
+                self.indicators_df.to_csv(indicators_path)
+                logging.info(f"Saved indicators to {indicators_path}")
                 
-            # if self.signals_df is not None:
-            #     signals_path = f"{save_path_prefix}{data_path_config['signals']}"
-            #     self.signals_df.to_csv(signals_path)
-            #     logging.info(f"Saved signals to {signals_path}")
+            if self.signals_df is not None:
+                signals_path = f"{save_path_prefix}{data_path_config['signals']}"
+                self.signals_df.to_csv(signals_path)
+                logging.info(f"Saved signals to {signals_path}")
                 
-            # if self.trades_df is not None:
-            #     trades_path = f"{save_path_prefix}{data_path_config['trades']}"
-            #     self.trades_df.to_csv(trades_path)
-            #     logging.info(f"Saved trades to {trades_path}")
+            if self.trades_df is not None:
+                trades_path = f"{save_path_prefix}{data_path_config['trades']}"
+                self.trades_df.to_csv(trades_path)
+                logging.info(f"Saved trades to {trades_path}")
                 
-            # if self.portfolio_df is not None:
-            #     portfolio_path = f"{save_path_prefix}{data_path_config['portafolio']}"
-            #     self.portfolio_df.to_csv(portfolio_path)
-            #     logging.info(f"Saved portfolio performance to {portfolio_path}")
+            if self.portfolio_df is not None:
+                portfolio_path = f"{save_path_prefix}{data_path_config['portafolio']}"
+                self.portfolio_df.to_csv(portfolio_path)
+                logging.info(f"Saved portfolio performance to {portfolio_path}")
                 
             return True
             
@@ -500,20 +396,15 @@ class Backtester:
         
         # Load data if path is provided
         if data_path:
-            self.load_data(data_path)
-            
-        if self.optimize_enabled:
-            logging.info("Starting Optimization workflow...")
-            self.run_optimiziation()
-            logging.info("Optimization Workflow Finished Succesfully")
-
-        # # Execute backtesting workflow
-        # logging.info("Starting complete backtesting workflow...")
+            self.load_data(data_path)          
+        
+        # Execute backtesting workflow
+        logging.info("Starting complete backtesting workflow...")
 
         
-        # self.prepare_indicators()
-        # self.generate_signals()
-        # self.run_backtest()
+        self.prepare_indicators()
+        self.generate_signals()
+        self.run_backtest()
         self.visualize_results()
         self.export_results()
         
@@ -531,8 +422,7 @@ if __name__ == "__main__":
     backtester.set_plot_mode(config_modes['plot_mode'])
     backtester.set_csv_export(config_modes['csv_export'])
     backtester.set_debug_mode(config_modes['debug_mode'])
-    backtester.set_optimize_mode(config_modes['optimize_mode'])
-    backtester.set_optimization_analysis_mode(config_modes['analise_optimization_mode'])
+
     
     # Run the complete backtesting workflow
     backtester.run_complete_backtest()
