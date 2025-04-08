@@ -42,11 +42,14 @@ class Backtester:
         self.trades_df = None
         self.portfolio_df = None
         self.metrics = None
-        
+        self.fee_analysis = None
         # Default modes
         self.debug_mode = False
         self.plot_enabled = False
         self.csv_export_enabled = False
+
+        #signal types (long, short, mix)
+        self.signal_type = self.config['signal_type']
      
         logging.info("Backtester initialized")
 
@@ -202,8 +205,15 @@ class Backtester:
             CCI_low_threshold = signals_config["CCI_low_threshold"]
             Bollinger_Keltner_alignment = signals_config["Bollinger_Keltner_alignment"]
             window_size = signals_config["window_size"]
+            
 
-            self.signals_df = signal_generator.generate_signals(self.indicators_df, CCI_up_threshold, CCI_low_threshold, Bollinger_Keltner_alignment, window_size, min_required_rows)
+            self.signals_df = signal_generator.generate_signals(self.indicators_df,
+                                                                 CCI_up_threshold, 
+                                                                 CCI_low_threshold, 
+                                                                 Bollinger_Keltner_alignment, 
+                                                                 window_size,
+                                                                 min_required_rows,
+                                                                 self.signal_type)
 
             logging.info(f"Generated {((self.signals_df['LongSignal']) | (self.signals_df['ShortSignal'])).sum()} trading signals")
 
@@ -256,9 +266,10 @@ class Backtester:
             self.trades_df = backtester.get_trades()
             self.portfolio_df = backtester.get_portfolio()
             self.metrics = backtester.get_metrics()
+            self.fee_analysis = backtester.get_fee_analysis()
             
             # Print detailed results
-            backtester.print_results()
+            backtester.print_results(self.signal_type)
             
             return self.trades_df, self.portfolio_df
             
@@ -289,47 +300,62 @@ class Backtester:
             # Create an instance of the visualizer
             visualizer = TradingVisualizer(default_figsize=(16, 12))
             
-            #Create a chart with indicators
+            # 1 Create a chart with indicators
             fig_indicators = visualizer.visualize_indicators(self.indicators_df)
             indicators_path = f"{save_path_prefix}{plot_path_config['indicators']}"
             plt.savefig(indicators_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved combined indicators plot to {indicators_path}")
             figures.append(fig_indicators)
+            logging.info(f"Plot {len(figures)}...Saved combined indicators plot to {indicators_path}")
+            
 
-            # Create and save multi-panel split indicator visualization
+            #2 Create and save multi-panel split indicator visualization
             fig_splited = visualizer.visualize_indicators_splited(self.indicators_df)
             indicators_splited_path = f"{save_path_prefix}{plot_path_config['indicators_splited']}"
             plt.savefig(indicators_splited_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved split indicators plot to {indicators_splited_path}")
             figures.append(fig_splited)
+            logging.info(f"Plot {len(figures)}...Saved split indicators plot to {indicators_splited_path}")
+            
 
-            # Plot backtest
-            fig_backtest = visualizer.plot_backtest_results(self.signals_df, self.portfolio_df, self.trades_df)
+            # 3Plot backtest
+            fig_backtest = visualizer.plot_backtest_results(self.signals_df, self.portfolio_df, self.trades_df,self.signal_type)
             backtest_path = f"{save_path_prefix}{plot_path_config['back_test']}"
             plt.savefig(backtest_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved backtest results plot to {backtest_path}")
             figures.append(fig_backtest)
+            logging.info(f"Plot {len(figures)}...Saved backtest results plot to {backtest_path}")
+            
                 
-            # Plot profit hist
-            fig_profit_hist = visualizer.plot_profit_histograms(self.trades_df)
+            # 4 Plot profit hist
+            fig_profit_hist = visualizer.plot_profit_histograms(self.trades_df,self.signal_type)
             profit_hist_path = f"{save_path_prefix}{plot_path_config['profit_distribution']}"
             plt.savefig(profit_hist_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved profit histogram plot to {profit_hist_path}")
             figures.append(fig_profit_hist)
+            logging.info(f"Plot {len(figures)}...Saved profit histogram plot to {profit_hist_path}")
             
-            # Plot signals
-            fig_signals = visualizer.plot_trading_signals(self.signals_df)
+            
+            
+            # 5 Plot signals
+            fig_signals = visualizer.plot_trading_signals(self.signals_df,self.signal_type)
             signals_path = f"{save_path_prefix}{plot_path_config['signals']}"
             plt.savefig(signals_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved signals plot to {signals_path}")
             figures.append(fig_signals)
+            logging.info(f"Plot {len(figures)}...Saved signals plot to {signals_path}")
+            
 
-            # Plot metrics
-            fig_metrics = visualizer.plot_performance_comparison(self.metrics)
+            # 6Plot metrics
+            fig_metrics = visualizer.plot_performance_comparison(self.metrics,self.signal_type)
             metrics_path = f"{save_path_prefix}{plot_path_config['metrics']}"
             plt.savefig(metrics_path, dpi=300, bbox_inches='tight')
-            logging.info(f"Saved metrics plot to {metrics_path}")
             figures.append(fig_metrics)
+            logging.info(f"Plot {len(figures)}...Saved metrics plot to {metrics_path}")
+
+            # 7 plot fees
+            
+            fig_fees = visualizer.visualize_fee_impact(self.trades_df,self.fee_analysis)
+            fee_path = f"{save_path_prefix}{plot_path_config['fees']}"
+            plt.savefig(fee_path, dpi=300, bbox_inches='tight')
+            figures.append(fig_fees)
+            logging.info(f"Plot {len(figures)}...Saved metrics plot to {fee_path}")
+            
 
 
           
@@ -377,6 +403,12 @@ class Backtester:
                 portfolio_path = f"{save_path_prefix}{data_path_config['portafolio']}"
                 self.portfolio_df.to_csv(portfolio_path)
                 logging.info(f"Saved portfolio performance to {portfolio_path}")
+
+            if self.fee_analysis is not None:
+                fees_path = f"{save_path_prefix}{data_path_config['fees']}"
+                self.fee_analysis.to_csv(fees_path)
+                logging.info(f"Saved fee analysis to {fees_path}")
+            
                 
             return True
             
