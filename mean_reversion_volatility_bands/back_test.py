@@ -1,18 +1,19 @@
 import json
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from utils.error_handler import ErrorHandler
+from utils.utils import convert_ndarrays
 
 
 class TradingBacktester:
     """
     A class for backtesting trading strategies with support for both long and short positions,
     take profit and stop loss levels, and performance metrics calculation.
-    Includes detailed fee analysis.
+    Includes detailed fee analysis and robust error handling.
     """
     
-    def __init__(self, initial_budget, tp_level, sl_level, fee_rate, max_positions):
+    def __init__(self, initial_budget, tp_level, sl_level, fee_rate, max_positions, debug_mode=False):
         """
         Initialize the backtester with strategy parameters.
         
@@ -24,12 +25,12 @@ class TradingBacktester:
             Take profit level as a multiple of ATR
         sl_level : float
             Stop loss level as a multiple of ATR
-        buy_fee_rate : float
-            Buy/entry trading fee as a percentage (0.005 = 0.5%)
-        sell_fee_rate : float
-            Sell/exit trading fee as a percentage (0.005 = 0.5%)
+        fee_rate : float
+            Trading fee as a percentage (0.005 = 0.5%)
         max_positions : int
             Maximum number of simultaneous positions
+        debug_mode : bool, optional
+            Whether to enable debug level logging (default: False)
         """
         self.initial_budget = initial_budget
         self.tp_level = tp_level
@@ -37,6 +38,9 @@ class TradingBacktester:
         self.buy_fee_rate = fee_rate
         self.sell_fee_rate = fee_rate
         self.max_positions = max_positions
+        
+        # Initialize error handler
+        self.error_handler = ErrorHandler(logger_name="TradingBacktester", debug_mode=debug_mode)
         
         # Initialize result containers
         self.trades_df = None
@@ -58,6 +62,19 @@ class TradingBacktester:
         self : TradingBacktester
             Returns self for method chaining
         """
+        # Validate the input dataframe
+        required_columns = ['timestamp', 'close', 'ATR', 'LongSignal', 'ShortSignal']
+        valid, message = self.error_handler.check_dataframe_validity(
+            signals_df, required_columns, min_rows=2, check_full=True
+        )
+        
+        if not valid:
+            self.error_handler.logger.error(f"Backtest failed: {message}")
+            return self
+        
+        # Log dataframe stats
+        self.error_handler.log_dataframe_stats(signals_df, ['close', 'ATR'])
+        
         # Run the backtest
         self.trades_df, self.portfolio_df = self._backtest_strategy(signals_df)
         
@@ -131,9 +148,23 @@ class TradingBacktester:
         self._close_remaining_positions(active_positions, df.iloc[-1], trades)
         
         # Create final dataframes
-        trades_df = pd.DataFrame(trades)
-        portfolio_df = pd.DataFrame(portfolio_history)
-        portfolio_df['Peak'] = portfolio_df['Portfolio_Value'].cummax()
+        if len(trades) > 0:
+            trades_df = pd.DataFrame(trades)
+        else:
+            self.error_handler.logger.warning("No trades were executed during the backtest.")
+            # Create empty DataFrame with expected columns
+            trades_df = pd.DataFrame(columns=[
+                'Entry_Date', 'Exit_Date', 'Type', 'Entry_Price', 'Exit_Price', 
+                'Shares', 'Cost', 'Result', 'Gross_Profit', 'Entry_Fee', 'Exit_Fee', 
+                'Total_Fees', 'Net_Profit', 'Fee_Pct_of_Value', 'Fee_Pct_of_Gross_Profit', 'Return_Pct'
+            ])
+            
+        if len(portfolio_history) > 0:
+            portfolio_df = pd.DataFrame(portfolio_history)
+            portfolio_df['Peak'] = portfolio_df['Portfolio_Value'].cummax()
+        else:
+            self.error_handler.logger.error("No portfolio history was recorded.")
+            portfolio_df = pd.DataFrame(columns=['timestamp', 'Portfolio_Value', 'Budget', 'Active_Positions', 'Peak'])
     
         return trades_df, portfolio_df
 
@@ -143,7 +174,12 @@ class TradingBacktester:
         
         # Ensure date is in datetime format
         if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            try:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                self.error_handler.logger.debug("Converted timestamp column to datetime format.")
+            except Exception as e:
+                self.error_handler.logger.error(f"Failed to convert timestamp column: {str(e)}")
+                # Still return the DataFrame even if conversion failed
         
         # Sort by date
         return df.sort_values('timestamp')
@@ -162,47 +198,77 @@ class TradingBacktester:
         # Calculate both entry and exit fees separately for analysis
         entry_fee = pos['entry_fee']
         
-        if pos['type'] == 'long':
-            # For long positions, exit fee is on selling
-            exit_shares_value = pos['shares'] * exit_price
-            exit_fee = exit_shares_value * self.sell_fee_rate
-            gross_profit = pos['shares'] * (exit_price - pos['entry_price'])
-            net_proceeds = exit_shares_value - exit_fee
-            net_profit = net_proceeds - pos['cost']
-        elif pos['type'] == 'short':
-            # For short positions, exit fee is on buying back
-            exit_shares_value = pos['shares'] * exit_price
-            exit_fee = exit_shares_value * self.buy_fee_rate
-            gross_profit = pos['shares'] * (pos['entry_price'] - exit_price)
-            buy_back_cost = exit_shares_value + exit_fee
-            net_profit = pos['cost'] - buy_back_cost
-        
-        total_fees = entry_fee + exit_fee
-        
-        # Calculate fee impact metrics
-        fee_percentage_of_trade_value = total_fees / (pos['shares'] * exit_price) * 100
-        fee_percentage_of_gross_profit = (total_fees / abs(gross_profit) * 100) if gross_profit != 0 else float('inf')
-        
-        trade_record = {
-            'Entry_Date': pos['entry_date'],
-            'Exit_Date': current_date,
-            'Type': pos['type'],
-            'Entry_Price': pos['entry_price'],
-            'Exit_Price': exit_price,
-            'Shares': pos['shares'],
-            'Cost': pos['cost'],
-            'Result': result,
-            'Gross_Profit': gross_profit,
-            'Entry_Fee': entry_fee,
-            'Exit_Fee': exit_fee,
-            'Total_Fees': total_fees,
-            'Net_Profit': net_profit,
-            'Fee_Pct_of_Value': fee_percentage_of_trade_value,
-            'Fee_Pct_of_Gross_Profit': fee_percentage_of_gross_profit,
-            'Return_Pct': (net_profit / pos['cost']) * 100
-        }
-        
-        return trade_record, net_profit
+        try:
+            if pos['type'] == 'long':
+                # For long positions, exit fee is on selling
+                exit_shares_value = pos['shares'] * exit_price
+                exit_fee = exit_shares_value * self.sell_fee_rate
+                gross_profit = pos['shares'] * (exit_price - pos['entry_price'])
+                net_proceeds = exit_shares_value - exit_fee
+                net_profit = net_proceeds - pos['cost']
+            elif pos['type'] == 'short':
+                # For short positions, exit fee is on buying back
+                exit_shares_value = pos['shares'] * exit_price
+                exit_fee = exit_shares_value * self.buy_fee_rate
+                gross_profit = pos['shares'] * (pos['entry_price'] - exit_price)
+                buy_back_cost = exit_shares_value + exit_fee
+                net_profit = pos['cost'] - buy_back_cost
+            else:
+                self.error_handler.logger.error(f"Unknown position type: {pos['type']}")
+                return None, 0
+            
+            total_fees = entry_fee + exit_fee
+            
+            # Calculate fee impact metrics using safe division
+            fee_percentage_of_trade_value = self.error_handler.handle_division(
+                total_fees, (pos['shares'] * exit_price), 0) * 100
+                
+            fee_percentage_of_gross_profit = self.error_handler.handle_division(
+                total_fees, abs(gross_profit), float('inf')) * 100
+            
+            trade_record = {
+                'Entry_Date': pos['entry_date'],
+                'Exit_Date': current_date,
+                'Type': pos['type'],
+                'Entry_Price': pos['entry_price'],
+                'Exit_Price': exit_price,
+                'Shares': pos['shares'],
+                'Cost': pos['cost'],
+                'Result': result,
+                'Gross_Profit': gross_profit,
+                'Entry_Fee': entry_fee,
+                'Exit_Fee': exit_fee,
+                'Total_Fees': total_fees,
+                'Net_Profit': net_profit,
+                'Fee_Pct_of_Value': fee_percentage_of_trade_value,
+                'Fee_Pct_of_Gross_Profit': fee_percentage_of_gross_profit,
+                'Return_Pct': self.error_handler.handle_division(net_profit, pos['cost'], 0) * 100
+            }
+            
+            return trade_record, net_profit
+            
+        except Exception as e:
+            self.error_handler.logger.error(f"Error processing trade: {str(e)}")
+            # Return a default trade record to avoid breaking the backtest
+            default_trade = {
+                'Entry_Date': pos.get('entry_date', pd.NaT),
+                'Exit_Date': current_date,
+                'Type': pos.get('type', 'unknown'),
+                'Entry_Price': pos.get('entry_price', 0),
+                'Exit_Price': exit_price,
+                'Shares': pos.get('shares', 0),
+                'Cost': pos.get('cost', 0),
+                'Result': 'error',
+                'Gross_Profit': 0,
+                'Entry_Fee': 0,
+                'Exit_Fee': 0,
+                'Total_Fees': 0,
+                'Net_Profit': 0,
+                'Fee_Pct_of_Value': 0,
+                'Fee_Pct_of_Gross_Profit': 0,
+                'Return_Pct': 0
+            }
+            return default_trade, 0
 
     def _process_existing_positions(self, active_positions, current_date, current_price, trades, budget):
         """Check and process existing positions for potential exit conditions."""
@@ -214,29 +280,36 @@ class TradingBacktester:
             result = None
             
             # Check take profit and stop loss conditions
-            if pos['type'] == 'long':
-                if current_price >= pos['take_profit']:
-                    exit_triggered = True
-                    exit_price = pos['take_profit']
-                    result = 'take_profit'
-                elif current_price <= pos['stop_loss']:
-                    exit_triggered = True
-                    exit_price = pos['stop_loss']
-                    result = 'stop_loss'
-            elif pos['type'] == 'short':
-                if current_price <= pos['take_profit']:
-                    exit_triggered = True
-                    exit_price = pos['take_profit']
-                    result = 'take_profit'
-                elif current_price >= pos['stop_loss']:
-                    exit_triggered = True
-                    exit_price = pos['stop_loss']
-                    result = 'stop_loss'
-                    
-            if exit_triggered:
-                trade, profit = self._process_trade(pos, exit_price, result, current_date)
-                budget += (pos['cost'] + profit)
-                trades.append(trade)
+            try:
+                if pos['type'] == 'long':
+                    if current_price >= pos['take_profit']:
+                        exit_triggered = True
+                        exit_price = pos['take_profit']
+                        result = 'take_profit'
+                    elif current_price <= pos['stop_loss']:
+                        exit_triggered = True
+                        exit_price = pos['stop_loss']
+                        result = 'stop_loss'
+                elif pos['type'] == 'short':
+                    if current_price <= pos['take_profit']:
+                        exit_triggered = True
+                        exit_price = pos['take_profit']
+                        result = 'take_profit'
+                    elif current_price >= pos['stop_loss']:
+                        exit_triggered = True
+                        exit_price = pos['stop_loss']
+                        result = 'stop_loss'
+                
+                if exit_triggered:
+                    trade, profit = self._process_trade(pos, exit_price, result, current_date)
+                    if trade is not None:
+                        budget += (pos['cost'] + profit)
+                        trades.append(trade)
+                        closed_positions.append(pos_idx)
+                        
+            except Exception as e:
+                self.error_handler.logger.error(f"Error processing position {pos_idx}: {str(e)}")
+                # Still mark the position as closed to avoid issues
                 closed_positions.append(pos_idx)
         
         return budget, closed_positions
@@ -245,28 +318,43 @@ class TradingBacktester:
         """Open new positions based on trading signals."""
         new_positions = []
         
+        # Use safe calculation for position creation
+        def safe_create_position(pos_type):
+            return self.error_handler.safe_calculation(
+                func=self._create_position,
+                default_value=None,
+                position_type=pos_type,
+                date=current_date,
+                price=current_price,
+                atr=current_atr,
+                position_size=position_size
+            )
+        
         # Check for long signal
         if current_row['LongSignal'] and position_size > 0:
-            pos = self._create_position(
-                'long', current_date, current_price, current_atr, position_size
-            )
-            if pos['cost'] <= position_size:
+            pos = safe_create_position('long')
+            if pos is not None and pos['cost'] <= position_size:
                 budget -= pos['cost']
                 new_positions.append(pos)
+                self.error_handler.logger.debug(f"Opened long position at {current_date}, price: {current_price}")
         
         # Check for short signal
         if current_row['ShortSignal'] and position_size > 0:
-            pos = self._create_position(
-                'short', current_date, current_price, current_atr, position_size
-            )
-            if pos['cost'] <= position_size:
+            pos = safe_create_position('short')
+            if pos is not None and pos['cost'] <= position_size:
                 budget -= pos['cost']
                 new_positions.append(pos)
+                self.error_handler.logger.debug(f"Opened short position at {current_date}, price: {current_price}")
         
         return budget, new_positions
 
     def _create_position(self, position_type, date, price, atr, position_size):
         """Create a new position dictionary with separate tracking of entry fee."""
+        # Validate inputs
+        if price <= 0 or atr <= 0 or position_size <= 0:
+            self.error_handler.logger.error(f"Invalid parameters for position creation: price={price}, atr={atr}, position_size={position_size}")
+            return None
+            
         if position_type == 'long':
             take_profit = price + (self.tp_level * atr)
             stop_loss = price - (self.sl_level * atr)
@@ -295,30 +383,42 @@ class TradingBacktester:
 
     def _calculate_portfolio_value(self, budget, active_positions, current_price):
         """Calculate the current portfolio value including open positions."""
-        open_positions_value = 0
-        for pos in active_positions:
-            if pos['type'] == 'long':
-                # For longs, current value is just shares * current price
-                open_positions_value += pos['shares'] * current_price
-            elif pos['type'] == 'short':
-                # For shorts, we need to calculate the value differently
-                # The initial position value was the cost (already in our accounting)
-                # The current liability is what it would cost to buy back
-                initial_value = pos['shares'] * pos['entry_price']
-                current_value = pos['shares'] * current_price
-                # Short positions gain value as the price goes down
-                open_positions_value += pos['cost'] - (current_value - initial_value)
-        
-        return budget + open_positions_value
+        try:
+            open_positions_value = 0
+            for pos in active_positions:
+                if pos['type'] == 'long':
+                    # For longs, current value is just shares * current price
+                    open_positions_value += pos['shares'] * current_price
+                elif pos['type'] == 'short':
+                    # For shorts, we need to calculate the value differently
+                    # The initial position value was the cost (already in our accounting)
+                    # The current liability is what it would cost to buy back
+                    initial_value = pos['shares'] * pos['entry_price']
+                    current_value = pos['shares'] * current_price
+                    # Short positions gain value as the price goes down
+                    open_positions_value += pos['cost'] - (current_value - initial_value)
+            
+            return budget + open_positions_value
+        except Exception as e:
+            self.error_handler.logger.error(f"Error calculating portfolio value: {str(e)}")
+            # Return budget as fallback
+            return budget
 
     def _close_remaining_positions(self, active_positions, last_row, trades):
         """Close any remaining open positions at the end of the backtest period."""
-        last_date = last_row['timestamp']
-        last_price = last_row['close']
-        
-        for pos in active_positions:
-            trade, profit = self._process_trade(pos, last_price, 'end_of_period', last_date)
-            trades.append(trade)
+        if active_positions:
+            self.error_handler.logger.info(f"Closing {len(active_positions)} remaining positions at end of period")
+            
+            try:
+                last_date = last_row['timestamp']
+                last_price = last_row['close']
+                
+                for pos in active_positions:
+                    trade, profit = self._process_trade(pos, last_price, 'end_of_period', last_date)
+                    if trade is not None:
+                        trades.append(trade)
+            except Exception as e:
+                self.error_handler.logger.error(f"Error closing remaining positions: {str(e)}")
             
     def _calculate_performance_metrics(self):
         """
@@ -332,89 +432,241 @@ class TradingBacktester:
         def get_trade_metrics(trades):
             """Helper function to calculate metrics for a given subset of trades."""
             metrics = {}
-            metrics['total_trades'] = len(trades)
+            total_trades = len(trades)
+            metrics['total_trades'] = total_trades
+            
+            # Avoid division by zero
+            if total_trades == 0:
+                self.error_handler.logger.warning("No trades found for metrics calculation")
+                return {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'total_profit': 0,
+                    'avg_profit_per_trade': 0,
+                    'avg_profit_winning': 0,
+                    'avg_loss_losing': 0,
+                    'profit_factor': 0,
+                    'total_fees': 0,
+                    'total_entry_fees': 0,
+                    'total_exit_fees': 0,
+                    'avg_fee_per_trade': 0,
+                    'fee_as_pct_of_profit': 0
+                }
+            
             metrics['winning_trades'] = len(trades[trades['Net_Profit'] > 0])
             metrics['losing_trades'] = len(trades[trades['Net_Profit'] <= 0])
-            metrics['win_rate'] = metrics['winning_trades'] / metrics['total_trades'] if metrics['total_trades'] > 0 else 0
+            
+            # Use safe division from error handler
+            metrics['win_rate'] = self.error_handler.handle_division(
+                metrics['winning_trades'], metrics['total_trades'], 0)
+                
             metrics['total_profit'] = trades['Net_Profit'].sum()
             metrics['avg_profit_per_trade'] = trades['Net_Profit'].mean() if metrics['total_trades'] > 0 else 0
-            metrics['avg_profit_winning'] = trades[trades['Net_Profit'] > 0]['Net_Profit'].mean() if metrics['winning_trades'] > 0 else 0
-            metrics['avg_loss_losing'] = trades[trades['Net_Profit'] <= 0]['Net_Profit'].mean() if metrics['losing_trades'] > 0 else 0
-            metrics['profit_factor'] = abs(metrics['avg_profit_winning'] / metrics['avg_loss_losing']) if metrics['avg_loss_losing'] != 0 else float('inf') if metrics['avg_profit_winning'] > 0 else 0
+            
+            metrics['avg_profit_winning'] = trades[trades['Net_Profit'] > 0]['Net_Profit'].mean() \
+                if metrics['winning_trades'] > 0 else 0
+                
+            metrics['avg_loss_losing'] = trades[trades['Net_Profit'] <= 0]['Net_Profit'].mean() \
+                if metrics['losing_trades'] > 0 else 0
+            
+            # Use safe division for profit factor
+            metrics['profit_factor'] = self.error_handler.handle_division(
+                abs(metrics['avg_profit_winning']), 
+                abs(metrics['avg_loss_losing']), 
+                float('inf') if metrics['avg_profit_winning'] > 0 else 0
+            )
             
             # Fee-specific metrics
             metrics['total_fees'] = trades['Total_Fees'].sum()
             metrics['total_entry_fees'] = trades['Entry_Fee'].sum()
             metrics['total_exit_fees'] = trades['Exit_Fee'].sum()
             metrics['avg_fee_per_trade'] = trades['Total_Fees'].mean()
-            metrics['fee_as_pct_of_profit'] = (metrics['total_fees'] / abs(metrics['total_profit'])) * 100 if metrics['total_profit'] != 0 else float('inf')
+            
+            # Use safe division for fee percentage
+            metrics['fee_as_pct_of_profit'] = self.error_handler.handle_division(
+                metrics['total_fees'], 
+                abs(metrics['total_profit']), 
+                float('inf')
+            ) * 100
             
             return metrics
 
-        # Overall metrics
-        overall_metrics = get_trade_metrics(self.trades_df)
-
-        # Separate long and short metrics
-        long_trades = self.trades_df[self.trades_df['Type'] == 'long']
-        short_trades = self.trades_df[self.trades_df['Type'] == 'short']
-        
-        long_metrics = get_trade_metrics(long_trades)
-        short_metrics = get_trade_metrics(short_trades)
-
-        # Return results
-        return {
-            'overall': overall_metrics,
-            'long': long_metrics,
-            'short': short_metrics,
-            'total_return_pct': (self.portfolio_df['Portfolio_Value'].iloc[-1] / self.initial_budget - 1) * 100,
-            'max_drawdown': self.portfolio_df['Portfolio_Value'].cummax().sub(self.portfolio_df['Portfolio_Value']).div(self.portfolio_df['Portfolio_Value'].cummax()).max() * 100
-        }
+        try:
+            # Overall metrics
+            overall_metrics = get_trade_metrics(self.trades_df)
+    
+            # Separate long and short metrics
+            long_trades = self.trades_df[self.trades_df['Type'] == 'long']
+            short_trades = self.trades_df[self.trades_df['Type'] == 'short']
+            
+            long_metrics = get_trade_metrics(long_trades)
+            short_metrics = get_trade_metrics(short_trades)
+    
+            # Calculate total return percentage safely
+            final_value = self.portfolio_df['Portfolio_Value'].iloc[-1] if len(self.portfolio_df) > 0 else self.initial_budget
+            total_return_pct = self.error_handler.handle_division(
+                final_value - self.initial_budget,
+                self.initial_budget,
+                0
+            ) * 100
+            
+            # Calculate max drawdown safely
+            if len(self.portfolio_df) > 0 and 'Portfolio_Value' in self.portfolio_df.columns:
+                try:
+                    cummax = self.portfolio_df['Portfolio_Value'].cummax()
+                    drawdowns = cummax.sub(self.portfolio_df['Portfolio_Value'])
+                    relative_drawdowns = self.error_handler.handle_division(
+                        drawdowns, 
+                        cummax, 
+                        0
+                    )
+                    max_drawdown = relative_drawdowns.max() * 100
+                except Exception as e:
+                    self.error_handler.logger.error(f"Error calculating max drawdown: {str(e)}")
+                    max_drawdown = 0
+            else:
+                max_drawdown = 0
+    
+            # Return results
+            return {
+                'overall': overall_metrics,
+                'long': long_metrics,
+                'short': short_metrics,
+                'total_return_pct': total_return_pct,
+                'max_drawdown': max_drawdown
+            }
+        except Exception as e:
+            self.error_handler.logger.error(f"Error calculating performance metrics: {str(e)}")
+            # Return default metrics
+            default_metrics = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'total_profit': 0,
+                'avg_profit_per_trade': 0,
+                'avg_profit_winning': 0,
+                'avg_loss_losing': 0,
+                'profit_factor': 0,
+                'total_fees': 0,
+                'total_entry_fees': 0,
+                'total_exit_fees': 0,
+                'avg_fee_per_trade': 0,
+                'fee_as_pct_of_profit': 0
+            }
+            return {
+                'overall': default_metrics,
+                'long': default_metrics,
+                'short': default_metrics,
+                'total_return_pct': 0,
+                'max_drawdown': 0
+            }
     
     def _analyze_fee_impact(self):
         """Analyze the impact of fees on trading performance."""
-        # Average fee percentage
-        fee_percentage = self.trades_df.copy()
-        fee_percentage['Entry_Fee_Pct'] = (fee_percentage['Entry_Fee'] / fee_percentage['Cost']) * 100
-
-        # Exit Value = Exit_Price * Shares
-        fee_percentage['Exit_Value'] = fee_percentage['Exit_Price'] * fee_percentage['Shares']
-
-        # Exit Fee % = Exit_Fee / Exit_Value * 100
-        fee_percentage['Exit_Fee_Pct'] = (fee_percentage['Exit_Fee'] / fee_percentage['Exit_Value']) * 100
-
-        # Calculate the averages
-        avg_entry_fee_pct = fee_percentage['Entry_Fee_Pct'].mean()
-        avg_exit_fee_pct = fee_percentage['Exit_Fee_Pct'].mean()
-
-        # Create summary statistics
-        fee_analysis = {
-            'Total_Gross_Profit': self.trades_df['Gross_Profit'].sum(),
-            'Total_Net_Profit': self.trades_df['Net_Profit'].sum(),
-            'Total_Fees': self.trades_df['Total_Fees'].sum(),
-            'Total_Entry_Fees': self.trades_df['Entry_Fee'].sum(),
-            'Total_Exit_Fees': self.trades_df['Exit_Fee'].sum(),
-            'Fee_Percentage_of_Gross_Profit': (self.trades_df['Total_Fees'].sum() / abs(self.trades_df['Gross_Profit'].sum()) * 100) 
-                                            if self.trades_df['Gross_Profit'].sum() != 0 else float('inf'),
-            'Average_Fee_Per_Trade': self.trades_df['Total_Fees'].mean(),
-            'Average_Entry_Fee': self.trades_df['Entry_Fee'].mean(),
-            'Average_Exit_Fee': self.trades_df['Exit_Fee'].mean(),
-            'Median_Fee_Per_Trade': self.trades_df['Total_Fees'].median(),
-            'Average_Fee_Pct_of_Value': self.trades_df['Fee_Pct_of_Value'].mean(),
-            'Trades_Where_Fees_Exceeded_Profit': ((self.trades_df['Total_Fees'] > self.trades_df['Gross_Profit']) & 
-                                                (self.trades_df['Gross_Profit'] > 0)).sum(),
-            'Profitable_Trades_Before_Fees': (self.trades_df['Gross_Profit'] > 0).sum(),
-            'Profitable_Trades_After_Fees': (self.trades_df['Net_Profit'] > 0).sum(),
-            'Lost_Profits_Due_To_Fees': ((self.trades_df['Gross_Profit'] > 0) & 
-                                        (self.trades_df['Net_Profit'] <= 0)).sum(),
-            'Avg_Entry_Fee_Pct': avg_entry_fee_pct,  # Changed to match naming convention
-            'Avg_Exit_Fee_Pct': avg_exit_fee_pct     # Changed to match naming convention
-        }
+        try:
+            if len(self.trades_df) == 0:
+                self.error_handler.logger.warning("No trades available for fee impact analysis")
+                return pd.DataFrame([{
+                    'Total_Gross_Profit': 0,
+                    'Total_Net_Profit': 0,
+                    'Total_Fees': 0,
+                    'Total_Entry_Fees': 0,
+                    'Total_Exit_Fees': 0,
+                    'Fee_Percentage_of_Gross_Profit': 0,
+                    'Average_Fee_Per_Trade': 0,
+                    'Average_Entry_Fee': 0,
+                    'Average_Exit_Fee': 0,
+                    'Median_Fee_Per_Trade': 0,
+                    'Average_Fee_Pct_of_Value': 0,
+                    'Trades_Where_Fees_Exceeded_Profit': 0,
+                    'Profitable_Trades_Before_Fees': 0,
+                    'Profitable_Trades_After_Fees': 0,
+                    'Lost_Profits_Due_To_Fees': 0,
+                    'Avg_Entry_Fee_Pct': 0,
+                    'Avg_Exit_Fee_Pct': 0
+                }])
+                
+            # Average fee percentage
+            fee_percentage = self.trades_df.copy()
+            
+            # Calculate safe entry fee percentage
+            fee_percentage['Entry_Fee_Pct'] = self.error_handler.handle_division(
+                fee_percentage['Entry_Fee'], fee_percentage['Cost'], 0) * 100
+    
+            # Exit Value = Exit_Price * Shares
+            fee_percentage['Exit_Value'] = fee_percentage['Exit_Price'] * fee_percentage['Shares']
+    
+            # Exit Fee % = Exit_Fee / Exit_Value * 100 (safe division)
+            fee_percentage['Exit_Fee_Pct'] = self.error_handler.handle_division(
+                fee_percentage['Exit_Fee'], fee_percentage['Exit_Value'], 0) * 100
+    
+            # Calculate the averages
+            avg_entry_fee_pct = fee_percentage['Entry_Fee_Pct'].mean()
+            avg_exit_fee_pct = fee_percentage['Exit_Fee_Pct'].mean()
+    
+            # Use safe division from error handler for percentage calculations
+            total_gross_profit = self.trades_df['Gross_Profit'].sum()
+            fee_percentage_of_gross_profit = self.error_handler.handle_division(
+                self.trades_df['Total_Fees'].sum(), 
+                abs(total_gross_profit), 
+                float('inf')
+            ) * 100
+            
+            # Create summary statistics
+            fee_analysis = {
+                'Total_Gross_Profit': total_gross_profit,
+                'Total_Net_Profit': self.trades_df['Net_Profit'].sum(),
+                'Total_Fees': self.trades_df['Total_Fees'].sum(),
+                'Total_Entry_Fees': self.trades_df['Entry_Fee'].sum(),
+                'Total_Exit_Fees': self.trades_df['Exit_Fee'].sum(),
+                'Fee_Percentage_of_Gross_Profit': fee_percentage_of_gross_profit,
+                'Average_Fee_Per_Trade': self.trades_df['Total_Fees'].mean(),
+                'Average_Entry_Fee': self.trades_df['Entry_Fee'].mean(),
+                'Average_Exit_Fee': self.trades_df['Exit_Fee'].mean(),
+                'Median_Fee_Per_Trade': self.trades_df['Total_Fees'].median(),
+                'Average_Fee_Pct_of_Value': self.trades_df['Fee_Pct_of_Value'].mean(),
+                'Trades_Where_Fees_Exceeded_Profit': ((self.trades_df['Total_Fees'] > self.trades_df['Gross_Profit']) & 
+                                                    (self.trades_df['Gross_Profit'] > 0)).sum(),
+                'Profitable_Trades_Before_Fees': (self.trades_df['Gross_Profit'] > 0).sum(),
+                'Profitable_Trades_After_Fees': (self.trades_df['Net_Profit'] > 0).sum(),
+                'Lost_Profits_Due_To_Fees': ((self.trades_df['Gross_Profit'] > 0) & 
+                                            (self.trades_df['Net_Profit'] <= 0)).sum(),
+                'Avg_Entry_Fee_Pct': avg_entry_fee_pct,
+                'Avg_Exit_Fee_Pct': avg_exit_fee_pct
+            }
+            
+            # Create a DataFrame for the fee analysis
+            fee_analysis_df = pd.DataFrame([fee_analysis])
+            
+            return fee_analysis_df
+            
+        except Exception as e:
+            self.error_handler.logger.error(f"Error analyzing fee impact: {str(e)}")
+            # Return empty DataFrame with expected columns
+            return pd.DataFrame([{
+                'Total_Gross_Profit': 0,
+                'Total_Net_Profit': 0,
+                'Total_Fees': 0,
+                'Total_Entry_Fees': 0,
+                'Total_Exit_Fees': 0,
+                'Fee_Percentage_of_Gross_Profit': 0,
+                'Average_Fee_Per_Trade': 0,
+                'Average_Entry_Fee': 0,
+                'Average_Exit_Fee': 0,
+                'Median_Fee_Per_Trade': 0,
+                'Average_Fee_Pct_of_Value': 0,
+                'Trades_Where_Fees_Exceeded_Profit': 0,
+                'Profitable_Trades_Before_Fees': 0,
+                'Profitable_Trades_After_Fees': 0,
+                'Lost_Profits_Due_To_Fees': 0,
+                'Avg_Entry_Fee_Pct': 0,
+                'Avg_Exit_Fee_Pct': 0
+            }])
         
-        # Create a DataFrame for the fee analysis
-        fee_analysis_df = pd.DataFrame([fee_analysis])
-        
-        return fee_analysis_df
-        
+    
     def print_results(self, signal_type='mix', include_fee_analysis=True):
         """
         Print the backtest results in a formatted way based on the signal type.
@@ -431,101 +683,138 @@ class TradingBacktester:
         self : TradingBacktester
             Returns self for method chaining
         """
-        if self.metrics is None:
-            print("No backtest results to display. Run backtest() first.")
-            return self
-        
-        # Validate signal_type parameter
-        if signal_type not in ['long', 'short', 'mix']:
-            print(f"Warning: Invalid signal_type: {signal_type}. Using default 'mix'.")
-            signal_type = 'mix'
+        try:
+            if self.metrics is None:
+                self.error_handler.logger.error("No backtest results to display. Run backtest() first.")
+                return self
             
-        print("\n----- BACKTEST -----")
-        print(f"Initial Budget: ${self.initial_budget:.2f}")
-        print(f"Final Portfolio Value: ${self.portfolio_df['Portfolio_Value'].iloc[-1]:.2f}")
-        
-        # Always print overall results for all signal types
-        print("\n----- OVERALL RESULTS -----")
-        print(f"Total Return: {self.metrics['total_return_pct']:.2f}%")
-        
-        if signal_type == 'mix':
-            # Print overall trade metrics
-            print(f"Total Overall Trades: {self.metrics['overall']['total_trades']}")
-            print(f"Win Rate: {self.metrics['overall']['win_rate'] * 100:.2f}%")
-            print(f"Profit Factor: {self.metrics['overall']['profit_factor']:.2f}")
-            print(f"Average Profit per Trade: ${self.metrics['overall']['avg_profit_per_trade']:.2f}")
-            print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
+            # Validate signal_type parameter
+            if signal_type not in ['long', 'short', 'mix']:
+                self.error_handler.logger.warning(f"Invalid signal_type: {signal_type}. Using default 'mix'.")
+                signal_type = 'mix'
+                
+            print("\n----- BACKTEST -----")
+            print(f"Initial Budget: ${self.initial_budget:.2f}")
+            
+            # Check that portfolio_df exists and has data
+            if self.portfolio_df is None or len(self.portfolio_df) == 0:
+                self.error_handler.logger.error("Portfolio data is missing or empty")
+                print("Error: Portfolio data is missing or empty")
+                return self
+                
+            try:
+                print(f"Final Portfolio Value: ${self.portfolio_df['Portfolio_Value'].iloc[-1]:.2f}")
+            except (KeyError, IndexError) as e:
+                self.error_handler.logger.error(f"Could not access final portfolio value: {str(e)}")
+                print("Error: Could not access final portfolio value")
+                
+            # Always print overall results for all signal types
+            print("\n----- OVERALL RESULTS -----")
+            try:
+                print(f"Total Return: {self.metrics['total_return_pct']:.2f}%")
+            except KeyError as e:
+                self.error_handler.logger.error(f"Missing metrics key: {str(e)}")
+                print(f"Total Return: N/A")
+            
+            try:
+                if signal_type == 'mix':
+                    # Print overall trade metrics
+                    print(f"Total Overall Trades: {self.metrics['overall']['total_trades']}")
+                    print(f"Win Rate: {self.metrics['overall']['win_rate'] * 100:.2f}%")
+                    print(f"Profit Factor: {self.metrics['overall']['profit_factor']:.2f}")
+                    print(f"Average Profit per Trade: ${self.metrics['overall']['avg_profit_per_trade']:.2f}")
+                    print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
 
-            # Print long results
-            print("\n----- LONG RESULTS -----")
-            print(f"Total Long Trades: {self.metrics['long']['total_trades']}")
-            print(f"Win Rate: {self.metrics['long']['win_rate'] * 100:.2f}%")
-            print(f"Winning Trades: {self.metrics['long']['winning_trades']}")
-            print(f"Losing Trades: {self.metrics['long']['losing_trades']}")
-            print(f"Total Profit: ${self.metrics['long']['total_profit']:.2f}")
-            print(f"Profit Factor: {self.metrics['long']['profit_factor']:.2f}")
-            print(f"Average Profit per Trade: ${self.metrics['long']['avg_profit_per_trade']:.2f}")
+                    # Print long results
+                    print("\n----- LONG RESULTS -----")
+                    print(f"Total Long Trades: {self.metrics['long']['total_trades']}")
+                    print(f"Win Rate: {self.metrics['long']['win_rate'] * 100:.2f}%")
+                    print(f"Winning Trades: {self.metrics['long']['winning_trades']}")
+                    print(f"Losing Trades: {self.metrics['long']['losing_trades']}")
+                    print(f"Total Profit: ${self.metrics['long']['total_profit']:.2f}")
+                    print(f"Profit Factor: {self.metrics['long']['profit_factor']:.2f}")
+                    print(f"Average Profit per Trade: ${self.metrics['long']['avg_profit_per_trade']:.2f}")
 
-            # Print short results
-            print("\n----- SHORT RESULTS -----")
-            print(f"Total Short Trades: {self.metrics['short']['total_trades']}")
-            print(f"Win Rate: {self.metrics['short']['win_rate'] * 100:.2f}%")
-            print(f"Winning Trades: {self.metrics['short']['winning_trades']}")
-            print(f"Losing Trades: {self.metrics['short']['losing_trades']}")
-            print(f"Total Profit: ${self.metrics['short']['total_profit']:.2f}")
-            print(f"Profit Factor: {self.metrics['short']['profit_factor']:.2f}")
-            print(f"Average Profit per Trade: ${self.metrics['short']['avg_profit_per_trade']:.2f}")
-        
-        elif signal_type == 'long':
-            # For long only, print just maximum drawdown from overall and then long details
-            print(f"Total Trades: {self.metrics['long']['total_trades']}")
-            print(f"Win Rate: {self.metrics['long']['win_rate'] * 100:.2f}%")
-            print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
+                    # Print short results
+                    print("\n----- SHORT RESULTS -----")
+                    print(f"Total Short Trades: {self.metrics['short']['total_trades']}")
+                    print(f"Win Rate: {self.metrics['short']['win_rate'] * 100:.2f}%")
+                    print(f"Winning Trades: {self.metrics['short']['winning_trades']}")
+                    print(f"Losing Trades: {self.metrics['short']['losing_trades']}")
+                    print(f"Total Profit: ${self.metrics['short']['total_profit']:.2f}")
+                    print(f"Profit Factor: {self.metrics['short']['profit_factor']:.2f}")
+                    print(f"Average Profit per Trade: ${self.metrics['short']['avg_profit_per_trade']:.2f}")
+                
+                elif signal_type == 'long':
+                    # For long only, print just maximum drawdown from overall and then long details
+                    print(f"Total Trades: {self.metrics['long']['total_trades']}")
+                    print(f"Win Rate: {self.metrics['long']['win_rate'] * 100:.2f}%")
+                    print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
+                    
+                    print("\n----- LONG RESULTS -----")
+                    print(f"Winning Trades: {self.metrics['long']['winning_trades']}")
+                    print(f"Losing Trades: {self.metrics['long']['losing_trades']}")
+                    print(f"Total Profit: ${self.metrics['long']['total_profit']:.2f}")
+                    print(f"Profit Factor: {self.metrics['long']['profit_factor']:.2f}")
+                    print(f"Average Profit per Trade: ${self.metrics['long']['avg_profit_per_trade']:.2f}")
+                
+                elif signal_type == 'short':
+                    # For short only, print just maximum drawdown from overall and then short details
+                    print(f"Total Trades: {self.metrics['short']['total_trades']}")
+                    print(f"Win Rate: {self.metrics['short']['win_rate'] * 100:.2f}%")
+                    print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
+                    
+                    print("\n----- SHORT RESULTS -----")
+                    print(f"Winning Trades: {self.metrics['short']['winning_trades']}")
+                    print(f"Losing Trades: {self.metrics['short']['losing_trades']}")
+                    print(f"Total Profit: ${self.metrics['short']['total_profit']:.2f}")
+                    print(f"Profit Factor: {self.metrics['short']['profit_factor']:.2f}")
+                    print(f"Average Profit per Trade: ${self.metrics['short']['avg_profit_per_trade']:.2f}")
+            except KeyError as e:
+                self.error_handler.logger.error(f"Missing key in metrics dictionary: {str(e)}")
+                print(f"Could not display all metrics due to missing data: {str(e)}")
             
-            print("\n----- LONG RESULTS -----")
-            print(f"Winning Trades: {self.metrics['long']['winning_trades']}")
-            print(f"Losing Trades: {self.metrics['long']['losing_trades']}")
-            print(f"Total Profit: ${self.metrics['long']['total_profit']:.2f}")
-            print(f"Profit Factor: {self.metrics['long']['profit_factor']:.2f}")
-            print(f"Average Profit per Trade: ${self.metrics['long']['avg_profit_per_trade']:.2f}")
-        
-        elif signal_type == 'short':
-            # For short only, print just maximum drawdown from overall and then short details
-            print(f"Total Trades: {self.metrics['short']['total_trades']}")
-            print(f"Win Rate: {self.metrics['short']['win_rate'] * 100:.2f}%")
-            print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2f}%")
+            # Print fee analysis if requested
+            if include_fee_analysis:
+                try:
+                    if self.fee_analysis_df is None or len(self.fee_analysis_df) == 0:
+                        self.error_handler.logger.warning("Fee analysis data is missing or empty")
+                        print("\n----- FEE ANALYSIS -----")
+                        print("No fee analysis data available")
+                    else:
+                        print("\n----- FEE ANALYSIS -----")
+                        fa = self.fee_analysis_df.iloc[0]
+                        print(f"Total Gross Profit: ${fa['Total_Gross_Profit']:.2f}")
+                        print(f"Total Net Profit: ${fa['Total_Net_Profit']:.2f}")
+                        print(f"Total Fees: ${fa['Total_Fees']:.2f}")
+                        print(f"  - Entry Fees: ${fa['Total_Entry_Fees']:.2f}")
+                        print(f"  - Exit Fees: ${fa['Total_Exit_Fees']:.2f}")
+                        print(f"Fee Percentage of Gross Profit: {fa['Fee_Percentage_of_Gross_Profit']:.2f}%")
+                        print(f"Average Fee Per Trade: ${fa['Average_Fee_Per_Trade']:.2f}")
+                        print(f"  - Average Entry Fee: ${fa['Average_Entry_Fee']:.2f}")
+                        print(f"  - Average Exit Fee: ${fa['Average_Exit_Fee']:.2f}")
+                        print(f"Trades Where Fees Exceeded Profit: {fa['Trades_Where_Fees_Exceeded_Profit']}")
+                        print(f"Profitable Trades Before Fees: {fa['Profitable_Trades_Before_Fees']}")
+                        print(f"Profitable Trades After Fees: {fa['Profitable_Trades_After_Fees']}")
+                        print(f"Profitable Trades Lost Due To Fees: {fa['Lost_Profits_Due_To_Fees']}")
+                except (KeyError, IndexError, AttributeError) as e:
+                    self.error_handler.logger.error(f"Error in fee analysis display: {str(e)}")
+                    print("Could not display all fee analysis data due to an error")
             
-            print("\n----- SHORT RESULTS -----")
-            print(f"Winning Trades: {self.metrics['short']['winning_trades']}")
-            print(f"Losing Trades: {self.metrics['short']['losing_trades']}")
-            print(f"Total Profit: ${self.metrics['short']['total_profit']:.2f}")
-            print(f"Profit Factor: {self.metrics['short']['profit_factor']:.2f}")
-            print(f"Average Profit per Trade: ${self.metrics['short']['avg_profit_per_trade']:.2f}")
-        
-        # Print fee analysis if requested
-        if include_fee_analysis and self.fee_analysis_df is not None:
-            print("\n----- FEE ANALYSIS -----")
-            fa = self.fee_analysis_df.iloc[0]
-            print(f"Total Gross Profit: ${fa['Total_Gross_Profit']:.2f}")
-            print(f"Total Net Profit: ${fa['Total_Net_Profit']:.2f}")
-            print(f"Total Fees: ${fa['Total_Fees']:.2f}")
-            print(f"  - Entry Fees: ${fa['Total_Entry_Fees']:.2f}")
-            print(f"  - Exit Fees: ${fa['Total_Exit_Fees']:.2f}")
-            print(f"Fee Percentage of Gross Profit: {fa['Fee_Percentage_of_Gross_Profit']:.2f}%")
-            print(f"Average Fee Per Trade: ${fa['Average_Fee_Per_Trade']:.2f}")
-            print(f"  - Average Entry Fee: ${fa['Average_Entry_Fee']:.2f}")
-            print(f"  - Average Exit Fee: ${fa['Average_Exit_Fee']:.2f}")
-            print(f"Trades Where Fees Exceeded Profit: {fa['Trades_Where_Fees_Exceeded_Profit']}")
-            print(f"Profitable Trades Before Fees: {fa['Profitable_Trades_Before_Fees']}")
-            print(f"Profitable Trades After Fees: {fa['Profitable_Trades_After_Fees']}")
-            print(f"Profitable Trades Lost Due To Fees: {fa['Lost_Profits_Due_To_Fees']}")
-        
-        print("\n-------------------")
-        with open("mean_reversion_volatility_bands/data/metrics.json", "w") as f:
-            json.dump(self.metrics, f, indent=4)
+            print("\n-------------------")
+            try:
+                safe_metrics = convert_ndarrays(self.metrics)
+                with open("mean_reversion_volatility_bands/data/metrics.json", "w") as f:
+                    json.dump(safe_metrics, f, indent=4)
+            except (IOError, PermissionError) as e:
+                self.error_handler.logger.error(f"Could not save metrics to file: {str(e)}")
+                print(f"Warning: Could not save metrics to file: {str(e)}")
+        except Exception as e:
+            self.error_handler.logger.error(f"Unexpected error in print_results: {str(e)}")
+            print(f"An unexpected error occurred while displaying results: {str(e)}")
         
         return self
-    
+
     def get_trades(self):
         """
         Get the trades dataframe from the backtest.
@@ -533,10 +822,32 @@ class TradingBacktester:
         Returns:
         --------
         trades_df : pandas DataFrame
-            DataFrame with trade results
+            DataFrame with trade results or None if no data available
         """
-        return self.trades_df
-    
+        try:
+            if self.trades_df is None:
+                self.error_handler.logger.warning("Trades DataFrame is None. Run backtest() first.")
+                return None
+                
+            if len(self.trades_df) == 0:
+                self.error_handler.logger.warning("Trades DataFrame is empty. No trades were executed.")
+            
+            # Check for essential columns
+            
+            essential_columns = ['Entry_Date', 'Exit_Date', 'Type', 'Entry_Price', 'Exit_Price',
+                                'Shares', 'Cost', 'Result', 'Gross_Profit', 'Entry_Fee', 'Exit_Fee',
+                                'Total_Fees', 'Net_Profit', 'Fee_Pct_of_Value',
+                                'Fee_Pct_of_Gross_Profit', 'Return_Pct']
+            missing_columns = [col for col in essential_columns if col not in self.trades_df.columns]
+            
+            if missing_columns:
+                self.error_handler.logger.warning(f"Trades DataFrame is missing essential columns: {missing_columns}")
+            
+            return self.trades_df
+        except Exception as e:
+            self.error_handler.logger.error(f"Error retrieving trades DataFrame: {str(e)}")
+            return None
+
     def get_portfolio(self):
         """
         Get the portfolio dataframe from the backtest.
@@ -544,10 +855,28 @@ class TradingBacktester:
         Returns:
         --------
         portfolio_df : pandas DataFrame
-            DataFrame with portfolio value over time
+            DataFrame with portfolio value over time or None if no data available
         """
-        return self.portfolio_df
-    
+        try:
+            if self.portfolio_df is None:
+                self.error_handler.logger.warning("Portfolio DataFrame is None. Run backtest() first.")
+                return None
+                
+            if len(self.portfolio_df) == 0:
+                self.error_handler.logger.warning("Portfolio DataFrame is empty.")
+            
+            # Check for essential columns
+            essential_columns = ['timestamp', 'Portfolio_Value', 'Budget', 'Active_Positions', 'Peak']
+            missing_columns = [col for col in essential_columns if col not in self.portfolio_df.columns]
+            
+            if missing_columns:
+                self.error_handler.logger.warning(f"Portfolio DataFrame is missing essential columns: {missing_columns}")
+            
+            return self.portfolio_df
+        except Exception as e:
+            self.error_handler.logger.error(f"Error retrieving portfolio DataFrame: {str(e)}")
+            return None
+
     def get_metrics(self):
         """
         Get the performance metrics from the backtest.
@@ -555,10 +884,25 @@ class TradingBacktester:
         Returns:
         --------
         metrics : dict
-            Dictionary with performance metrics
+            Dictionary with performance metrics or None if no metrics available
         """
-        return self.metrics
-    
+        try:
+            if self.metrics is None:
+                self.error_handler.logger.warning("Metrics dictionary is None. Run backtest() first.")
+                return None
+            
+            # Check for essential metrics
+            essential_metrics = ['total_return_pct', 'max_drawdown', 'overall', 'long', 'short']
+            missing_metrics = [metric for metric in essential_metrics if metric not in self.metrics]
+            
+            if missing_metrics:
+                self.error_handler.logger.warning(f"Metrics dictionary is missing essential metrics: {missing_metrics}")
+            
+            return self.metrics
+        except Exception as e:
+            self.error_handler.logger.error(f"Error retrieving metrics: {str(e)}")
+            return None
+
     def get_fee_analysis(self):
         """
         Get the fee analysis dataframe from the backtest.
@@ -566,8 +910,24 @@ class TradingBacktester:
         Returns:
         --------
         fee_analysis_df : pandas DataFrame
-            DataFrame with fee analysis metrics
+            DataFrame with fee analysis metrics or None if no fee analysis available
         """
-        return self.fee_analysis_df
-    
-    
+        try:
+            if self.fee_analysis_df is None:
+                self.error_handler.logger.warning("Fee analysis DataFrame is None. Run backtest() with fees enabled.")
+                return None
+                
+            if len(self.fee_analysis_df) == 0:
+                self.error_handler.logger.warning("Fee analysis DataFrame is empty.")
+            
+            # Check for essential columns
+            essential_columns = ['Total_Gross_Profit', 'Total_Net_Profit', 'Total_Fees']
+            missing_columns = [col for col in essential_columns if col not in self.fee_analysis_df.columns]
+            
+            if missing_columns:
+                self.error_handler.logger.warning(f"Fee analysis DataFrame is missing essential columns: {missing_columns}")
+            
+            return self.fee_analysis_df
+        except Exception as e:
+            self.error_handler.logger.error(f"Error retrieving fee analysis DataFrame: {str(e)}")
+            return None

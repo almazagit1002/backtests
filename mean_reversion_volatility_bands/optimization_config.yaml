@@ -6,6 +6,7 @@ save_data_paths:
   optimization_analysis: optimization_analysis
   update_config: mean_reversion_volatility_bands/config.yaml
 
+signal_type: mix
 modes:
   analise_optimization_mode: True
 
@@ -14,18 +15,18 @@ backtest:
   fee_rate: 0.005
 
 pbounds:
-  tp_level: [1.0, 3.5]
+  tp_level: [1.5, 4.0]
   sl_level: [0.5, 2.5]
-  max_positions: [1, 10]
+  max_positions: [5, 18]
   atr_multiplier: [1.2, 3.5]
-  keltner_period: [15,30]
+  keltner_period: [15,40]
   cci_period: [14, 50]
   bollinger_period: [10, 50]
-  std_multiplier: [1.2, 3.0]
-  CCI_up_threshold: [50, 110]
-  CCI_low_threshold: [-110, -10]
+  std_multiplier: [1.2, 3.5]
+  CCI_up_threshold: [50, 115]
+  CCI_low_threshold: [-110, -20]
   Bollinger_Keltner_alignment: [0.001, 0.01]
-  window_size: [3, 10]
+  window_size: [3, 12]
 optimization:
   init_points: 5
-  n_iter: 10
+  n_iter: 15

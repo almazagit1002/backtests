@@ -8,10 +8,11 @@ The backtesting framework provides several key features:
 
 - Support for both long and short positions
 - Dynamic take profit and stop loss levels based on ATR
-- Transaction cost modeling
+- Detailed transaction cost modeling with separate entry/exit fee tracking
 - Position sizing and portfolio management
-- Comprehensive performance metrics
-- Parameter optimization capabilities
+- Comprehensive performance metrics with separate long/short analysis
+- Detailed fee impact analysis
+- Flexible reporting options by signal type (long, short, or mix)
 
 ## Position Management
 
@@ -46,6 +47,26 @@ take_profit = entry_price - (tp_level * current_atr)
 stop_loss = entry_price + (sl_level * current_atr)
 ```
 
+### Fee Handling
+
+The backtester tracks and analyzes trading fees with high detail:
+
+- Entry fees (buying for long positions, selling for short positions)
+- Exit fees (selling for long positions, buying for short positions)
+- Fee impact on gross profit and overall performance
+- Trades that would have been profitable without fees
+
+Fees are calculated as a percentage of the trade value:
+```python
+# For long positions
+entry_fee = shares * price * buy_fee_rate
+exit_fee = (shares * exit_price) * sell_fee_rate
+
+# For short positions
+entry_fee = shares * price * sell_fee_rate
+exit_fee = (shares * exit_price) * buy_fee_rate
+```
+
 ## Performance Metrics
 
 The backtester calculates a comprehensive set of performance metrics:
@@ -62,6 +83,15 @@ The backtester calculates a comprehensive set of performance metrics:
 - **Win Rate**: Percentage of profitable trades
 - **Profit Factor**: Ratio of gross profits to gross losses
 - **Average Profit per Trade**: Mean profit/loss across all trades
+- **Winning/Losing Trades**: Count of profitable and unprofitable trades
+
+### Fee Analysis
+
+- **Total Fees**: Sum of all trading fees (entry + exit)
+- **Fee Percentage of Gross Profit**: How much of the gross profit was consumed by fees
+- **Average Fee Per Trade**: Mean fee across all trades
+- **Trades Lost Due to Fees**: Count of trades that would have been profitable without fees
+- **Entry/Exit Fee Analysis**: Separate metrics for fees at entry and exit points
 
 ### Position Type Analysis
 
@@ -73,22 +103,20 @@ The metrics are calculated separately for:
 
 This separation allows for analysis of how the strategy performs in different market conditions.
 
-## Parameter Optimization
+## Reporting Options
 
-The backtesting framework includes an optimization feature that tests multiple combinations of parameters to find optimal settings:
+The backtester provides flexible reporting options through the `print_results` method:
 
 ```python
-def optimize_parameters(self, signals_df, tp_levels=[1, 2, 3], sl_levels=[0.5, 1, 1.5]):
-    # Runs backtests with all combinations of tp_levels and sl_levels
-    # Returns results sorted by total return
+backtester.print_results(
+    signal_type='mix',  # Options: 'long', 'short', or 'mix'
+    include_fee_analysis=True  # Whether to include fee impact details
+)
 ```
 
-The optimization process evaluates different combinations of:
-
-- Take profit levels
-- Stop loss levels
-
-Results are sorted by total return, but other metrics like drawdown and profit factor can be considered for selecting the best parameter combination.
+- **Signal Type Filtering**: Focus analysis on long positions, short positions, or both
+- **Fee Analysis Toggle**: Include or exclude detailed fee impact reporting
+- **JSON Export**: Performance metrics are automatically exported to a JSON file
 
 ## Usage Example
 
@@ -98,33 +126,35 @@ backtester = TradingBacktester(
     initial_budget=10000,
     tp_level=2.0,
     sl_level=1.0,
-    fee_rate=0.005,
+    fee_rate=0.005,  # 0.5% fee for both entry and exit
     max_positions=4
 )
 
 # Run backtest on signal data
 backtester.backtest(signals_df)
 
-# Print results
+# Print results (default: includes both long and short signals)
 backtester.print_results()
 
-# Optimize parameters
-optimization_results = backtester.optimize_parameters(
-    signals_df,
-    tp_levels=[1.5, 2.0, 2.5, 3.0],
-    sl_levels=[0.5, 1.0, 1.5]
-)
+# Print results for long signals only
+backtester.print_results(signal_type='long')
+
+# Get detailed fee analysis
+fee_analysis = backtester.get_fee_analysis()
 ```
 
 ## Output Data
 
-The backtesting process generates two main DataFrames:
+The backtesting process generates several data structures:
 
 1. **Trades DataFrame**: Contains detailed information about each trade:
    - Entry and exit dates/prices
    - Position type (long/short)
    - Result (take profit, stop loss, end of period)
-   - Profit/loss amount and percentage
+   - Gross profit/loss amount
+   - Entry and exit fees
+   - Net profit/loss amount and percentage
+   - Fee impact metrics
 
 2. **Portfolio DataFrame**: Tracks the portfolio value over time:
    - Portfolio value at each time step
@@ -132,4 +162,19 @@ The backtesting process generates two main DataFrames:
    - Number of active positions
    - Peak portfolio value (for drawdown calculation)
 
-These outputs can be accessed via the `get_trades()` and `get_portfolio()` methods for further analysis or visualization.
+3. **Fee Analysis DataFrame**: Provides detailed statistics about fee impact:
+   - Total fees and breakdown between entry/exit
+   - Fee percentage of total trade value
+   - Fee percentage of gross profit
+   - Trades affected by fees
+
+4. **Performance Metrics**: A dictionary with comprehensive statistics:
+   - Overall performance metrics
+   - Separate metrics for long and short positions
+   - Return percentages and drawdown information
+
+These outputs can be accessed via the following methods:
+- `get_trades()`: Returns the trades DataFrame
+- `get_portfolio()`: Returns the portfolio value history
+- `get_metrics()`: Returns the performance metrics dictionary
+- `get_fee_analysis()`: Returns the fee analysis DataFrame

@@ -6,14 +6,12 @@ from matplotlib.gridspec import GridSpec
 import os
 import sys
 from scipy import stats
-import datetime
 from sklearn.preprocessing import MinMaxScaler
-import logging
-import traceback
 import shutil
+import traceback
 
-logging.getLogger('PIL').setLevel(logging.WARNING)
-logging.getLogger('matplotlib').setLevel(logging.WARNING)
+from utils.error_handler import ErrorHandler
+
 class OptimizationAnalyzer:
     """
     A class for analyzing trading strategy optimization results.
@@ -23,7 +21,7 @@ class OptimizationAnalyzer:
     and error handling.
     """
     
-    def __init__(self, optimization_results, output_dir, log_level=logging.INFO):
+    def __init__(self, optimization_results, output_dir, debug_mode=False):
         """
         Initialize the OptimizationAnalyzer with data path and output directory.
         
@@ -33,11 +31,12 @@ class OptimizationAnalyzer:
             Optimization results to analyze
         output_dir : str, optional
             Directory where analysis results will be saved
-        log_level : int, optional
-            Logging level (default: logging.INFO)
+        debug_mode : bool, optional
+            Whether to enable debug level logging (default: False)
         """
-        # Set up logging
-        self.logger = self._setup_logger(log_level)
+        # Set up error handler with logger
+        self.error_handler = ErrorHandler(logger_name="OptimizationAnalyzer", debug_mode=debug_mode)
+        self.logger = self.error_handler.logger
         
         try:
             # Set default output directory if not provided
@@ -58,7 +57,6 @@ class OptimizationAnalyzer:
             # Initialize data attributes
             self.df = optimization_results
             
-            
             self.sorted_df = None
             self.correlations = None
             self.best_config = None
@@ -75,74 +73,39 @@ class OptimizationAnalyzer:
             self.logger.debug(traceback.format_exc())
             raise
     
-    def _setup_logger(self, log_level):
-        """
-        Set up and configure the logger.
-        
-        Parameters:
-        -----------
-        log_level : int
-            Logging level
-            
-        Returns:
-        --------
-        logger : logging.Logger
-            Configured logger
-        """
-        # Create logger
-        logger = logging.getLogger(__name__)
-        logger.setLevel(log_level)
-        
-        # Create console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(log_level)
-        
-        # Create file handler
-        # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        # file_handler = logging.FileHandler(f"optimization_analysis_{timestamp}.log")
-        # file_handler.setLevel(log_level)
-        
-        # Create formatter
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(formatter)
-        # file_handler.setFormatter(formatter)
-        
-        # Add handlers to logger
-        logger.addHandler(console_handler)
-        # logger.addHandler(file_handler)
-        
-        return logger
-    
     def load_data(self):
         """
         Load optimization data from CSV file.
-        
-        Parameters:
-        -----------
-        data_path : str, optional
-            Path to the CSV file with optimization results. If not provided,
-            uses the path from initialization.
         
         Returns:
         --------
         self : OptimizationAnalyzer
             Returns self for method chaining
         """
-        try:          
-            # Validate data structure
+        try:
+            # Define required columns for validation
             required_columns = ['total_return_pct']
-            for col in required_columns:
-                if col not in self.df.columns:
-                    self.logger.error(f"Required column '{col}' not found in data")
-                    raise ValueError(f"Required column '{col}' not found in data")
+            
+            # Validate DataFrame using error handler
+            is_valid, error_message = self.error_handler.check_dataframe_validity(
+                self.df, 
+                required_columns=required_columns,
+                min_rows=1
+            )
+            
+            if not is_valid:
+                self.logger.error(f"Invalid data: {error_message}")
+                raise ValueError(f"Invalid data: {error_message}")
             
             # Clean the DataFrame - remove the first column (usually an index)
             self.df = self.df.copy()
             
-            # Check for empty dataframe
-            if len(self.df) == 0:
-                self.logger.warning("Loaded data is empty")
-                
+            # Log DataFrame statistics for key columns
+            self.error_handler.log_dataframe_stats(
+                self.df, 
+                columns=['total_return_pct'] + [col for col in self.df.columns if col != 'total_return_pct']
+            )
+            
             # Calculate basic statistics
             self._calculate_statistics()
             
@@ -159,24 +122,38 @@ class OptimizationAnalyzer:
         Calculate basic statistics from the optimization data.
         This is an internal method called after loading the data.
         """
-        try:
+        def calc_func(**kwargs):
             # Sort by performance
-            self.sorted_df = self.df.sort_values('total_return_pct', ascending=False).reset_index(drop=True)
+            sorted_df = self.df.sort_values('total_return_pct', ascending=False).reset_index(drop=True)
      
             # Calculate correlations
-            self.correlations = self.df.corr()['total_return_pct'].drop('total_return_pct').sort_values(ascending=False)
+            correlations = self.df.corr()['total_return_pct'].drop('total_return_pct').sort_values(ascending=False)
             
             # Find key statistics
-            self.best_config = self.sorted_df.iloc[0]
-            self.avg_return = self.df['total_return_pct'].mean()
-            self.positive_returns = (self.df['total_return_pct'] > 0).sum()
+            best_config = sorted_df.iloc[0]
+            avg_return = self.df['total_return_pct'].mean()
+            positive_returns = (self.df['total_return_pct'] > 0).sum()
             
+            return {
+                'sorted_df': sorted_df,
+                'correlations': correlations,
+                'best_config': best_config,
+                'avg_return': avg_return,
+                'positive_returns': positive_returns
+            }
+        
+        # Use safe calculation method from error handler
+        results = self.error_handler.safe_calculation(calc_func, default_value={})
+        
+        if results:
+            self.sorted_df = results.get('sorted_df')
+            self.correlations = results.get('correlations')
+            self.best_config = results.get('best_config')
+            self.avg_return = results.get('avg_return')
+            self.positive_returns = results.get('positive_returns')
             self.logger.debug("Statistics calculated successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating statistics: {str(e)}")
-            self.logger.debug(traceback.format_exc())
-            raise
+        else:
+            self.logger.error("Failed to calculate statistics")
     
     def _check_data_loaded(self):
         """
@@ -267,7 +244,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/1_parameter_correlations.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Parameter correlation plot saved to: {fig_path}")
@@ -307,7 +284,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/2_top_configurations.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Top configurations visualization saved to: {fig_path}")
@@ -355,8 +332,18 @@ class OptimizationAnalyzer:
                     plt.grid(linestyle='--', alpha=0.7)
                     plt.colorbar(scatter, label='Return %')
                     
-                    # Add linear regression line
-                    slope, intercept, r_value, p_value, std_err = stats.linregress(self.df[param], self.df['total_return_pct'])
+                    # Add linear regression line - using safe calculation
+                    def linear_regression(**kwargs):
+                        x_data = self.df[param]
+                        y_data = self.df['total_return_pct']
+                        slope, intercept, r_value, p_value, std_err = stats.linregress(x_data, y_data)
+                        return slope, intercept, r_value
+                    
+                    slope, intercept, r_value = self.error_handler.safe_calculation(
+                        linear_regression, 
+                        default_value=(0, 0, 0)
+                    )
+                    
                     x = np.array([min(self.df[param]), max(self.df[param])])
                     y = intercept + slope * x
                     plt.plot(x, y, 'r--', alpha=0.7)
@@ -367,7 +354,7 @@ class OptimizationAnalyzer:
                     
                     # Save figure
                     fig_path = f"{self.output_dir}/3_{i+1}_scatter_{param}.png"
-                    plt.savefig(fig_path, dpi=300)
+                    plt.savefig(fig_path, dpi=150)
                     plt.close()
                     
                     self.logger.info(f"Scatter plot for {param} saved to: {fig_path}")
@@ -418,7 +405,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/4_correlation_heatmap.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Correlation heatmap saved to: {fig_path}")
@@ -455,7 +442,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/5_return_distribution.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Return distribution histogram saved to: {fig_path}")
@@ -502,7 +489,7 @@ class OptimizationAnalyzer:
             bottom = self.sorted_df.tail(bottom_n)
             combined = pd.concat([top, bottom])
             
-            # Normalize the data for parallel coordinates
+            # Normalize the data for parallel coordinates using safe division
             numeric_cols = combined.select_dtypes(include=[np.number]).columns.tolist()
             
             # Check if total_return_pct is in numeric_cols before removing
@@ -530,7 +517,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/6_parallel_coordinates.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Parallel coordinates plot saved to: {fig_path}")
@@ -566,8 +553,14 @@ class OptimizationAnalyzer:
                 
             self.logger.info(f"Creating pairplot for top {top_n} parameters")
             
-            # Create a categorical column for positive/negative returns
-            self.df['return_category'] = np.where(self.df['total_return_pct'] > 0, 'Positive', 'Negative')
+            # Create a categorical column for positive/negative returns using safe calculation
+            def categorize_returns(**kwargs):
+                return np.where(self.df['total_return_pct'] > 0, 'Positive', 'Negative')
+            
+            self.df['return_category'] = self.error_handler.safe_calculation(
+                categorize_returns, 
+                default_value='Unknown'
+            )
             
             top_params = self.correlations.index[:top_n]
             
@@ -581,7 +574,7 @@ class OptimizationAnalyzer:
             # Create and save the pairplot
             pair_plot = sns.pairplot(pair_df, vars=list(top_params) + ['total_return_pct'], 
                          hue='return_category',
-                         palette={'Positive': 'green', 'Negative': 'red'},
+                         palette={'Positive': 'green', 'Negative': 'red', 'Unknown': 'gray'},
                          plot_kws={'alpha': 0.6, 's': 80})
                          
             pair_plot.fig.suptitle('Pairplot of Top Parameters', y=1.02, fontsize=16)
@@ -589,7 +582,7 @@ class OptimizationAnalyzer:
             
             # Save figure
             fig_path = f"{self.output_dir}/7_pairplot.png"
-            plt.savefig(fig_path, dpi=300)
+            plt.savefig(fig_path, dpi=150)
             plt.close()
             
             self.logger.info(f"Pairplot saved to: {fig_path}")

@@ -75,6 +75,19 @@ This helps in understanding the profitability patterns and identifying if the st
 
 ![Profit Distribution](../../images/profit_distribution.png)
 
+### Fee Impact Analysis
+
+The `visualize_fee_impact` method creates a 2×2 grid showing detailed analysis of how trading fees affect overall performance:
+
+1. **Gross Profit vs Total Fees by Trade**: Bar chart of gross profit with overlaid line plot of fees for the first 50 trades
+2. **Total Gross vs Fees vs Net Profit**: Bar chart comparing total gross profit, total fees, and net profit with percentage annotations
+3. **Distribution of Fee % of Trade Value**: Histogram showing how fees as a percentage of trade value are distributed across all trades
+4. **Impact of Fees on Profitability**: Pie chart categorizing trades into "Profitable After Fees", "Would be Profitable Without Fees", and "Unprofitable Regardless"
+
+This visualization provides critical insights into how transaction costs affect strategy performance and helps in optimizing fee structures or trade sizing.
+![Fees Impact Analysis](../../images/fees.png)
+
+
 ## Usage Example
 
 ```python
@@ -96,6 +109,10 @@ visualizer.save_figure(backtest_fig, "images/backtest.pdf")
 # Visualize profit distribution
 profit_fig = visualizer.plot_profit_histograms(trades_df)
 visualizer.save_figure(profit_fig, "images/profit_distribution.pdf")
+
+# Visualize fee impact analysis
+fee_impact_fig = visualizer.visualize_fee_impact(trades_df, fee_analysis_df)
+visualizer.save_figure(fee_impact_fig, "images/fee_impact.pdf")
 ```
 
 ## Customization Options

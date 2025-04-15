@@ -2,6 +2,8 @@ import os
 import yaml
 import pandas as pd
 import logging
+import numpy as np
+import json
 
 
 def save_config_yaml(df, config_path):
@@ -113,4 +115,15 @@ def load_config(config_path):
             return config
     except Exception as e:
         logging.error(f"Error loading config: {str(e)}. Using default configuration.")
-        
+    
+def convert_ndarrays(obj):
+    if isinstance(obj, dict):
+        return {k: convert_ndarrays(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_ndarrays(i) for i in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.generic):  # handles np.float64, np.int64, etc.
+        return obj.item()
+    else:
+        return obj
